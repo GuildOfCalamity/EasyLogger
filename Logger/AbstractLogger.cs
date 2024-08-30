@@ -24,6 +24,7 @@ namespace Logger
     /// </summary>
     public abstract class LoggerBase : IDisposable
     {
+        public event Action<Exception> OnException;
         protected readonly string _logFilePath;
         protected readonly int _minWait = 5; // milliseconds
         protected readonly string _timeFormat = "yyyy-MM-dd hh:mm:ss.fff tt"; // 2024-08-24 11:30:00.000 AM
@@ -54,6 +55,12 @@ namespace Logger
         {
             Console.WriteLine($"[INFO] {this.GetType()?.Name} of base type {this.GetType()?.BaseType?.Name} is disposing.");
         }
+
+        /// <summary>
+        /// Exception event for any listeners.
+        /// </summary>
+        /// <param name="ex"><see cref="Exception"/></param>
+        public virtual void RaiseException(Exception ex) => OnException?.Invoke(ex);
 
         /// <summary>
         /// Gets the full path to the log file.
@@ -94,7 +101,6 @@ namespace Logger
             return false; // file is not locked
         }
     }
-
 
     // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -142,7 +148,7 @@ namespace Logger
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to write to log file: {ex.Message}");
+                RaiseException(ex);
             }
             finally
             {
@@ -151,7 +157,7 @@ namespace Logger
                     if (!_semaphore.IsDisposed && _semaphore.CurrentCount < 1)
                         _semaphore?.Release();
                 }
-                catch (Exception ex) { Console.WriteLine($"Semaphore.Release(): {ex.Message}"); }
+                catch (Exception) { }
             }
         }
 
@@ -242,7 +248,7 @@ namespace Logger
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to flush log buffer: {ex.Message}");
+                RaiseException(ex);
             }
             finally
             {
@@ -251,7 +257,7 @@ namespace Logger
                     if (!_semaphore.IsDisposed && _semaphore.CurrentCount < 1)
                         _semaphore?.Release();
                 }
-                catch (Exception ex) { Console.WriteLine($"Semaphore.Release(): {ex.Message}"); }
+                catch (Exception) { }
             }
         }
 
@@ -326,7 +332,7 @@ namespace Logger
             {
                 if (!_collection.TryAdd(new Message(value, level, time)))
                 {
-                    Console.WriteLine("[WARNING] Unable to add message to BlockingCollection!");
+                    RaiseException(new Exception("Unable to add message to BlockingCollection"));
                 }
                 //m_Collection.CompleteAdding(); //marks the collection as not accepting any more additions
             }
@@ -341,7 +347,7 @@ namespace Logger
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ERROR] Failed to flush collection: {ex.Message}");
+                RaiseException(ex);
             }
 
             _threadRunning = false;
@@ -368,12 +374,12 @@ namespace Logger
                 }
                 catch (Exception ex) /* typically permission or file-lock issue */
                 {
-                    Console.WriteLine($"[ERROR] Could not write: {ex.Message}");
+                    RaiseException(ex);
                 }
             }
             else
             {
-                Console.WriteLine("[WARNING] Unable to remove message from BlockingCollection!");
+                Debug.WriteLine("[WARNING] Unable to remove message from BlockingCollection!");
             }
         }
 
@@ -395,12 +401,15 @@ namespace Logger
 
     // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    /// <summary>
+    /// Basic test class.
+    /// </summary>
     public static class TestLogger
     {
         public static void Run()
         {
-            Console.WriteLine($"{Environment.NewLine}• Testing Plain {nameof(LoggerBase)}…");
-            using (LoggerBase log = new DeferredLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerPlain.txt")))
+            Console.WriteLine($"{Environment.NewLine}• Testing Deferred {nameof(LoggerBase)}…");
+            using (LoggerBase log = new DeferredLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerDeferred.txt")))
             {
                 log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
                 /** something extra could go here **/
