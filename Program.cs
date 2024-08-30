@@ -1,9 +1,7 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 using Logger;
 
 namespace EasyLogger
@@ -14,9 +12,11 @@ namespace EasyLogger
         {
             Console.OutputEncoding = Encoding.UTF8;
 
-            Console.WriteLine($"{Environment.NewLine}• Testing Plain {nameof(LoggerBase)}…");
-            using (LoggerBase log = new DeferredLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerPlain.txt")))
+            Console.WriteLine($"{Environment.NewLine}• Testing Deferred {nameof(LoggerBase)}…");
+            using (LoggerBase log = new DeferredLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerDeferred.txt")))
             {
+                log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+
                 log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
                 /** something extra could go here **/
                 log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
@@ -27,6 +27,8 @@ namespace EasyLogger
             Console.WriteLine($"{Environment.NewLine}• Testing Buffered {nameof(LoggerBase)}…");
             using (LoggerBase log = new BufferedLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerBuffered.txt")))
             {
+                log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+
                 log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
                 /** something extra could go here **/
                 log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
@@ -37,6 +39,8 @@ namespace EasyLogger
             Console.WriteLine($"{Environment.NewLine}• Testing Queued {nameof(LoggerBase)}…");
             using (LoggerBase log = new QueuedLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerQueued.txt")))
             {
+                log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+
                 log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
                 /** something extra could go here **/
                 log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
