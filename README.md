@@ -1,6 +1,6 @@
 # EasyLogger
 
-## v1.0.0.0 - Aug 2024
+## v1.0.0.0 - August 2024
 **Dependencies**
 
 | Assembly | Version |
