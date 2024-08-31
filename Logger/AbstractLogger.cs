@@ -148,18 +148,17 @@ namespace Logger
                     //await writer.FlushAsync();
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 try
-                {
-                    // Try one more time before raising an exception event.
+                {   // Try one more time before raising an exception event.
                     using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
                     {
                         await writer.WriteLineAsync($"{message}");
                         //await writer.FlushAsync();
                     }
                 }
-                catch (Exception ioex)
+                catch (Exception ex)
                 {
                     RaiseException(ex);
                 }
