@@ -126,9 +126,7 @@ namespace Logger
             if (level == LogLevel.OFF)
                 Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delim} {level}{_delim} " : $"{level}{_delim} ") + $"{message}");
             else
-            {
                 Task.Run(async () => await WriteLogToFileAsync((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delim} {level}{_delim} " : $"{level}{_delim} ") + $"{message}"));
-            }
         }
 
         async Task WriteLogToFileAsync(string message)
@@ -141,7 +139,6 @@ namespace Logger
             try
             {
                 while (IsFileLocked(new FileInfo(_logFilePath)) && --maxTries > 0) { await Task.Delay(_minWait); }
-
                 using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
                 {
                     await writer.WriteLineAsync($"{message}");
@@ -298,7 +295,7 @@ namespace Logger
             //int maxTries = _minWait * 2;
             //var awaiter = FlushLogBuffer().GetAwaiter();
             //while (!awaiter.IsCompleted && --maxTries > 0)
-            //    Thread.Sleep(_minWait);
+            //    await Task.Delay(_minWait);
 
             if (!_semaphore.IsDisposed)
                 _semaphore.Dispose();
@@ -403,7 +400,7 @@ namespace Logger
             }
             else
             {
-                Debug.WriteLine("[WARNING] Unable to remove message from BlockingCollection!");
+                RaiseException(new Exception("Unable to remove message from BlockingCollection!"));
             }
         }
 
@@ -435,6 +432,8 @@ namespace Logger
             Console.WriteLine($"{Environment.NewLine}• Testing Deferred {nameof(LoggerBase)}…");
             using (LoggerBase log = new DeferredLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerDeferred.txt")))
             {
+                log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+
                 log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
                 /** something extra could go here **/
                 log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
@@ -445,6 +444,8 @@ namespace Logger
             Console.WriteLine($"{Environment.NewLine}• Testing Buffered {nameof(LoggerBase)}…");
             using (LoggerBase log = new BufferedLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerBuffered.txt")))
             {
+                log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+
                 log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
                 /** something extra could go here **/
                 log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
@@ -455,6 +456,8 @@ namespace Logger
             Console.WriteLine($"{Environment.NewLine}• Testing Queued {nameof(LoggerBase)}…");
             using (LoggerBase log = new QueuedLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerQueued.txt")))
             {
+                log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+
                 log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
                 /** something extra could go here **/
                 log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
