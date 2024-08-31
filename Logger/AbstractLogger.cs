@@ -26,6 +26,7 @@ namespace Logger
     {
         public event Action<Exception> OnException;
         protected readonly string _logFilePath;
+        protected readonly string _delim ="\t";
         protected readonly int _minWait = 5; // milliseconds
         protected readonly string _timeFormat = "yyyy-MM-dd hh:mm:ss.fff tt"; // 2024-08-24 11:30:00.000 AM
 
@@ -123,12 +124,14 @@ namespace Logger
         public override void Write(string message, LogLevel level, bool time)
         {
             if (level == LogLevel.OFF)
-                Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}\t {level}\t " : $"{level}\t ") + $"{message}");
+                Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delim} {level}{_delim} " : $"{level}{_delim} ") + $"{message}");
             else
-                Task.Run(async () => await WriteLogToFileAsync((time ? $"{DateTime.Now.ToString(_timeFormat)}\t {level}\t " : $"{level}\t ") + $"{message}"));
+            {
+                Task.Run(async () => await WriteLogToFileAsync((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delim} {level}{_delim} " : $"{level}{_delim} ") + $"{message}"));
+            }
         }
 
-        private async Task WriteLogToFileAsync(string message)
+        async Task WriteLogToFileAsync(string message)
         {
             int maxTries = _minWait * 2;
 
@@ -137,8 +140,7 @@ namespace Logger
 
             try
             {
-                while (IsFileLocked(new FileInfo(_logFilePath)) && --maxTries > 0)
-                    Thread.Sleep(_minWait);
+                while (IsFileLocked(new FileInfo(_logFilePath)) && --maxTries > 0) { await Task.Delay(_minWait); }
 
                 using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
                 {
@@ -148,12 +150,29 @@ namespace Logger
             }
             catch (Exception ex)
             {
-                RaiseException(ex);
+                try
+                {
+                    // Try one more time before raising an exception event.
+                    using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
+                    {
+                        await writer.WriteLineAsync($"{message}");
+                        //await writer.FlushAsync();
+                    }
+                }
+                catch (Exception ioex)
+                {
+                    RaiseException(ex);
+                }
             }
             finally
             {
                 try
                 {
+                    // https://learn.microsoft.com/en-us/dotnet/api/system.threading.semaphoreslim.release?view=netframework-4.8.1
+                    // A call to the Release() method increments the CurrentCount property by one.
+                    // If the value of the CurrentCount property is zero before this method is called,
+                    // the method also allows one thread or task blocked by a call to the Wait or
+                    // WaitAsync method to enter the semaphore.
                     if (!_semaphore.IsDisposed && _semaphore.CurrentCount < 1)
                         _semaphore?.Release();
                 }
@@ -201,11 +220,11 @@ namespace Logger
         {
             if (level == LogLevel.OFF)
             {
-                Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}\t {level}\t " : $"{level}\t ") + $"{message}");
+                Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delim} {level}{_delim} " : $"{level}{_delim} ") + $"{message}");
             }
             else
             {
-                _logQueue.Enqueue((time ? $"{DateTime.Now.ToString(_timeFormat)}\t {level}\t " : $"{level}\t ") + $"{message}");
+                _logQueue.Enqueue((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delim} {level}{_delim} " : $"{level}{_delim} ") + $"{message}");
                 if (_logQueue.Count > (_minWait * 10))
                     Task.Run(() => FlushLogBuffer());
             }
@@ -254,6 +273,11 @@ namespace Logger
             {
                 try
                 {
+                    // https://learn.microsoft.com/en-us/dotnet/api/system.threading.semaphoreslim.release?view=netframework-4.8.1
+                    // A call to the Release() method increments the CurrentCount property by one.
+                    // If the value of the CurrentCount property is zero before this method is called,
+                    // the method also allows one thread or task blocked by a call to the Wait or
+                    // WaitAsync method to enter the semaphore.
                     if (!_semaphore.IsDisposed && _semaphore.CurrentCount < 1)
                         _semaphore?.Release();
                 }
@@ -271,10 +295,11 @@ namespace Logger
             _flushTimer.Change(Timeout.Infinite, Timeout.Infinite);
             _flushTimer.Dispose();
 
-            int maxTries = _minWait * 2;
-            var awaiter = FlushLogBuffer().GetAwaiter();
-            while (!awaiter.IsCompleted && --maxTries > 0)
-                Thread.Sleep(_minWait);
+            await FlushLogBuffer();
+            //int maxTries = _minWait * 2;
+            //var awaiter = FlushLogBuffer().GetAwaiter();
+            //while (!awaiter.IsCompleted && --maxTries > 0)
+            //    Thread.Sleep(_minWait);
 
             if (!_semaphore.IsDisposed)
                 _semaphore.Dispose();
@@ -326,7 +351,7 @@ namespace Logger
         {
             if (level == LogLevel.OFF)
             {
-                Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}\t {level}\t " : $"{level}\t ") + $"{value}");
+                Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delim} {level}{_delim} " : $"{level}{_delim} ") + $"{value}");
             }
             else
             {
@@ -368,7 +393,7 @@ namespace Logger
 
                     using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
                     {
-                        writer.WriteLine((msg.time ? $"{DateTime.Now.ToString(_timeFormat)}\t {msg.level}\t " : $"{msg.level}\t ") + $"{msg.text}");
+                        writer.WriteLine((msg.time ? $"{DateTime.Now.ToString(_timeFormat)}{_delim} {msg.level}{_delim} " : $"{msg.level}{_delim} ") + $"{msg.text}");
                         //writer.Flush();
                     }
                 }
