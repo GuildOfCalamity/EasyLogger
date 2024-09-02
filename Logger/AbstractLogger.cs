@@ -26,7 +26,7 @@ public abstract class LoggerBase : IDisposable
 {
     public event Action<Exception> OnException;
     protected readonly string _logFilePath;
-    protected readonly string _delim ="\t";
+    protected string _delimiter ="\t";
     protected readonly int _minWait = 5; // milliseconds
     protected string _timeFormat = "yyyy-MM-dd hh:mm:ss.fff tt"; // 2024-08-24 11:30:00.000 AM
 
@@ -69,12 +69,21 @@ public abstract class LoggerBase : IDisposable
     public virtual string LogFilePath() => _logFilePath;
 
     /// <summary>
-    /// Gets the full path to the log file.
+    /// Gets or sets the full path to the log file.
     /// </summary>
     public virtual string TimeFormat
     {
         get => _timeFormat;
         set => _timeFormat = value;
+    }
+
+    /// <summary>
+    /// Gets the field delimeter.
+    /// </summary>
+    public virtual string Delimiter
+    {
+        get => _delimiter;
+        set => _delimiter = value;
     }
 
     /// <summary>
@@ -133,9 +142,9 @@ public class DeferredLogger : LoggerBase
     public override void Write(string message, LogLevel level, bool time)
     {
         if (level == LogLevel.OFF)
-            Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delim} {level}{_delim} " : $"{level}{_delim} ") + $"{message}");
+            Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
         else
-            Task.Run(async () => await WriteLogToFileAsync((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delim} {level}{_delim} " : $"{level}{_delim} ") + $"{message}"));
+            Task.Run(async () => await WriteLogToFileAsync((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}"));
     }
 
     async Task WriteLogToFileAsync(string message)
@@ -225,11 +234,11 @@ public class BufferedLogger : LoggerBase
     {
         if (level == LogLevel.OFF)
         {
-            Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delim} {level}{_delim} " : $"{level}{_delim} ") + $"{message}");
+            Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
         }
         else
         {
-            _logQueue.Enqueue((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delim} {level}{_delim} " : $"{level}{_delim} ") + $"{message}");
+            _logQueue.Enqueue((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
             if (_logQueue.Count > (_minWait * 10))
                 Task.Run(() => FlushLogBuffer());
         }
@@ -356,7 +365,7 @@ public class QueuedLogger : LoggerBase
     {
         if (level == LogLevel.OFF)
         {
-            Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delim} {level}{_delim} " : $"{level}{_delim} ") + $"{value}");
+            Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{value}");
         }
         else
         {
@@ -398,7 +407,7 @@ public class QueuedLogger : LoggerBase
 
                 using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
                 {
-                    writer.WriteLine((msg.time ? $"{DateTime.Now.ToString(_timeFormat)}{_delim} {msg.level}{_delim} " : $"{msg.level}{_delim} ") + $"{msg.text}");
+                    writer.WriteLine((msg.time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{msg.level}{_delimiter}" : $"{msg.level}{_delimiter}") + $"{msg.text}");
                     //writer.Flush();
                 }
             }
