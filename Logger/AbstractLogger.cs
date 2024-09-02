@@ -28,7 +28,7 @@ public abstract class LoggerBase : IDisposable
     protected readonly string _logFilePath;
     protected readonly string _delim ="\t";
     protected readonly int _minWait = 5; // milliseconds
-    protected readonly string _timeFormat = "yyyy-MM-dd hh:mm:ss.fff tt"; // 2024-08-24 11:30:00.000 AM
+    protected string _timeFormat = "yyyy-MM-dd hh:mm:ss.fff tt"; // 2024-08-24 11:30:00.000 AM
 
     /// <summary>
     /// Base constructor
@@ -67,6 +67,15 @@ public abstract class LoggerBase : IDisposable
     /// Gets the full path to the log file.
     /// </summary>
     public virtual string LogFilePath() => _logFilePath;
+
+    /// <summary>
+    /// Gets the full path to the log file.
+    /// </summary>
+    public virtual string TimeFormat
+    {
+        get => _timeFormat;
+        set => _timeFormat = value;
+    }
 
     /// <summary>
     /// Provides a virtual method to determine if a file is being accessed by another thread.
@@ -432,6 +441,7 @@ public static class TestLogger
         Console.WriteLine($"{Environment.NewLine}• Testing Deferred {nameof(LoggerBase)}…");
         using (LoggerBase log = new DeferredLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerDeferred.txt")))
         {
+            log.TimeFormat = "yyyy-MM-dd hh:mm:ss.fff tt";
             log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
 
             log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
@@ -444,6 +454,7 @@ public static class TestLogger
         Console.WriteLine($"{Environment.NewLine}• Testing Buffered {nameof(LoggerBase)}…");
         using (LoggerBase log = new BufferedLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerBuffered.txt")))
         {
+            log.TimeFormat = "MM-dd-yyyy hh:mm:ss.fff tt";
             log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
 
             log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
@@ -456,6 +467,7 @@ public static class TestLogger
         Console.WriteLine($"{Environment.NewLine}• Testing Queued {nameof(LoggerBase)}…");
         using (LoggerBase log = new QueuedLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerQueued.txt")))
         {
+            log.TimeFormat = "MM/dd/yyyy hh:mm:ss.fff tt";
             log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
 
             log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
