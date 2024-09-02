@@ -16,12 +16,21 @@
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
     <OptimizeImplicitlyTriggeredBuild>true</OptimizeImplicitlyTriggeredBuild>
     <PreserveCompilationContext>false</PreserveCompilationContext>
+    <StartupObject>EasyLogger.Program</StartupObject>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Remove="Logger\**" />
     <EmbeddedResource Remove="Logger\**" />
     <None Remove="Logger\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="AppIcon.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="AppIcon.ico" />
   </ItemGroup>
 
   <ItemGroup>
