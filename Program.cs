@@ -2,19 +2,18 @@
 using System.Text;
 using Logger;
 
-namespace EasyLogger
+namespace EasyLogger;
+
+public class Program
 {
-    public class Program
+    static void Main(string[] args)
     {
-        static void Main(string[] args)
-        {
-            Console.OutputEncoding = Encoding.UTF8;
+        Console.OutputEncoding = Encoding.UTF8;
 
-            TestLogger.Run();
+        TestLogger.Run();
 
-            Console.Write($"{Environment.NewLine}• Press any key to exit…");
+        Console.Write($"{Environment.NewLine}• Press any key to exit…");
 
-            _ = Console.ReadKey(true);
-        }
+        _ = Console.ReadKey(true);
     }
 }
