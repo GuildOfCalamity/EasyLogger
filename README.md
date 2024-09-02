@@ -5,7 +5,7 @@
 
 | Assembly | Version |
 | ---- | ---- |
-| dotNet | 4.8.1 |
+| NetCore | 5.0 |
 
 - A logger library which offers deferred writing so as to not block the main execution thread.
 - This solution includes a console application for testing the logger DLL.
