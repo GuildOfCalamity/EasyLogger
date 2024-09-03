@@ -11,10 +11,11 @@ namespace Logger;
 public enum LogLevel
 {
     OFF = 0,
-    INFO = 1 << 0,    // 2^0 (1)
-    WARNING = 1 << 1, // 2^1 (2)
-    ERROR = 1 << 2,   // 2^3 (4)
-    FATAL = 1 << 3,   // 2^4 (8)
+    DEBUG = 1 << 0,   // 2^0 (1)
+    INFO = 1 << 1,    // 2^1 (2)
+    WARNING = 1 << 2, // 2^2 (4)
+    ERROR = 1 << 3,   // 2^3 (8)
+    FATAL = 1 << 4,   // 2^4 (16)
 }
 
 // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -24,10 +25,10 @@ public enum LogLevel
 /// </summary>
 public abstract class LoggerBase : IDisposable
 {
-    public event Action<Exception> OnException;
-    protected readonly string _logFilePath;
-    protected string _delimiter ="\t";
+    public event Action<Exception>? OnException;
     protected readonly int _minWait = 5; // milliseconds
+    protected string _logFilePath;
+    protected string _delimiter ="\t";
     protected string _timeFormat = "yyyy-MM-dd hh:mm:ss.fff tt"; // 2024-08-24 11:30:00.000 AM
 
     /// <summary>
@@ -42,6 +43,36 @@ public abstract class LoggerBase : IDisposable
             _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.log");
     }
 
+    #region [Props]
+    /// <summary>
+    /// Gets or sets the full path to the log file.
+    /// </summary>
+    public virtual string LogFilePath
+    {
+        get => _logFilePath;
+        set => _logFilePath = value;
+    }
+
+    /// <summary>
+    /// Gets or sets the full path to the log file.
+    /// </summary>
+    public virtual string TimeFormat
+    {
+        get => _timeFormat;
+        set => _timeFormat = value;
+    }
+
+    /// <summary>
+    /// Gets or sets the field delimiter.
+    /// </summary>
+    public virtual string Delimiter
+    {
+        get => _delimiter;
+        set => _delimiter = value;
+    }
+    #endregion
+
+    #region [Methods]
     /// <summary>
     /// Abstract method for logging a message, to be implemented by derived classes
     /// </summary>
@@ -64,36 +95,13 @@ public abstract class LoggerBase : IDisposable
     public virtual void RaiseException(Exception ex) => OnException?.Invoke(ex);
 
     /// <summary>
-    /// Gets the full path to the log file.
-    /// </summary>
-    public virtual string LogFilePath() => _logFilePath;
-
-    /// <summary>
-    /// Gets or sets the full path to the log file.
-    /// </summary>
-    public virtual string TimeFormat
-    {
-        get => _timeFormat;
-        set => _timeFormat = value;
-    }
-
-    /// <summary>
-    /// Gets the field delimeter.
-    /// </summary>
-    public virtual string Delimiter
-    {
-        get => _delimiter;
-        set => _delimiter = value;
-    }
-
-    /// <summary>
     /// Provides a virtual method to determine if a file is being accessed by another thread.
     /// </summary>
     /// <param name="file"><see cref="FileInfo"/></param>
     /// <returns>true if file is in use, false otherwise</returns>
     public virtual bool IsFileLocked(FileInfo file)
     {
-        FileStream stream = null;
+        FileStream? stream = null;
         try
         {
             if (!File.Exists(file.FullName))
@@ -119,10 +127,10 @@ public abstract class LoggerBase : IDisposable
         }
         return false; // file is not locked
     }
+    #endregion
 }
 
-// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+#region [DeferredLogger]
 /// <summary>
 /// Simple deferred-style logger for non-blocked calls with file I/O.
 /// </summary>
@@ -163,7 +171,7 @@ public class DeferredLogger : LoggerBase
                 //await writer.FlushAsync();
             }
         }
-        catch (Exception)
+        catch (Exception) /* typically permission or file-lock issue */
         {
             try
             {   // Try one more time before raising an exception event.
@@ -182,7 +190,7 @@ public class DeferredLogger : LoggerBase
         {
             try
             {
-                // https://learn.microsoft.com/en-us/dotnet/api/system.threading.semaphoreslim.release?view=netframework-4.8.1
+                // https://learn.microsoft.com/en-us/dotnet/api/system.threading.semaphoreslim.release
                 // A call to the Release() method increments the CurrentCount property by one.
                 // If the value of the CurrentCount property is zero before this method is called,
                 // the method also allows one thread or task blocked by a call to the Wait or
@@ -202,9 +210,9 @@ public class DeferredLogger : LoggerBase
         base.Dispose();
     }
 }
+#endregion
 
-// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+#region [BufferedLogger]
 /// <summary>
 /// Simple deferred-style logger for non-blocked calls with file I/O.
 /// </summary>
@@ -246,11 +254,11 @@ public class BufferedLogger : LoggerBase
 
     async Task FlushLogBuffer()
     {
-        if (!_semaphore.IsDisposed)
-            await _semaphore?.WaitAsync();
-
         try
         {
+            if (!_semaphore.IsDisposed)
+                await _semaphore?.WaitAsync();
+
             if (_logQueue.IsEmpty)
                 return;
 
@@ -287,7 +295,7 @@ public class BufferedLogger : LoggerBase
         {
             try
             {
-                // https://learn.microsoft.com/en-us/dotnet/api/system.threading.semaphoreslim.release?view=netframework-4.8.1
+                // https://learn.microsoft.com/en-us/dotnet/api/system.threading.semaphoreslim.release
                 // A call to the Release() method increments the CurrentCount property by one.
                 // If the value of the CurrentCount property is zero before this method is called,
                 // the method also allows one thread or task blocked by a call to the Wait or
@@ -315,15 +323,19 @@ public class BufferedLogger : LoggerBase
         //while (!awaiter.IsCompleted && --maxTries > 0)
         //    await Task.Delay(_minWait);
 
-        if (!_semaphore.IsDisposed)
-            _semaphore.Dispose();
+        try
+        {
+            if (!_semaphore.IsDisposed)
+                _semaphore.Dispose();
+        }
+        catch (Exception) { }
 
         base.Dispose();
     }
 }
+#endregion
 
-// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+#region [QueuedLogger]
 /// <summary>
 /// Creates a <see cref="System.Threading.Thread"/> that watches the 
 /// <see cref="System.Collections.Concurrent.BlockingCollection{T}"/> 
@@ -437,9 +449,9 @@ public class QueuedLogger : LoggerBase
     }
     #endregion
 }
+#endregion
 
-// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+#region [TestLogger]
 /// <summary>
 /// Basic test class.
 /// </summary>
@@ -457,7 +469,7 @@ public static class TestLogger
             /** something extra could go here **/
             log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
             
-            Console.WriteLine($"{log.LogFilePath()}");
+            Console.WriteLine($"{log.LogFilePath}");
         }
 
         Console.WriteLine($"{Environment.NewLine}• Testing Buffered {nameof(LoggerBase)}…");
@@ -470,7 +482,7 @@ public static class TestLogger
             /** something extra could go here **/
             log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
 
-            Console.WriteLine($"{log.LogFilePath()}");
+            Console.WriteLine($"{log.LogFilePath}");
         }
 
         Console.WriteLine($"{Environment.NewLine}• Testing Queued {nameof(LoggerBase)}…");
@@ -483,7 +495,8 @@ public static class TestLogger
             /** something extra could go here **/
             log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
 
-            Console.WriteLine($"{log.LogFilePath()}");
+            Console.WriteLine($"{log.LogFilePath}");
         }
     }
 }
+#endregion
