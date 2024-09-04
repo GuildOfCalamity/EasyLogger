@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -40,7 +41,11 @@ public abstract class LoggerBase : IDisposable
         if (!string.IsNullOrEmpty(logFilePath))
             _logFilePath = logFilePath;
         else
-            _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.log");
+        {
+            //_logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.log");
+            try { _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetEntryAssembly().Location)}.log"); }
+            catch { _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetExecutingAssembly().Location)}.log"); }
+        }
     }
 
     #region [Props]
@@ -174,7 +179,9 @@ public class DeferredLogger : LoggerBase
         catch (Exception) /* typically permission or file-lock issue */
         {
             try
-            {   // Try one more time before raising an exception event.
+            {
+                await Task.Delay(_minWait);
+                // Try one more time before raising an exception event.
                 using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
                 {
                     await writer.WriteLineAsync($"{message}");
@@ -451,6 +458,115 @@ public class QueuedLogger : LoggerBase
 }
 #endregion
 
+#region [TokenLogger]
+/// <summary>
+/// Simple deferred-style logger for non-blocked calls with file I/O.
+/// </summary>
+public class TokenLogger :  LoggerBase
+{
+    readonly BlockingCollection<string> _logQueue;
+    readonly CancellationTokenSource _cts;
+    readonly Task _processTask;
+    bool _isDisposed = false;
+
+    public TokenLogger(string logFilePath) : base(logFilePath)
+    {
+        _logQueue = new BlockingCollection<string>();
+        _cts = new CancellationTokenSource();
+        _processTask = Task.Run(async () => await ProcessLogQueue(_cts.Token));
+    }
+
+    /// <summary>
+    /// Enqueues a log message.
+    /// </summary>
+    public override void Write(string message, LogLevel level, bool time)
+    {
+        if (level == LogLevel.OFF)
+            Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
+        else
+            _logQueue.Add((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
+    }
+
+    async Task ProcessLogQueue(CancellationToken token)
+    {
+        while (!_isDisposed)
+        {
+            try
+            {
+                foreach (var logMessage in _logQueue.GetConsumingEnumerable(token))
+                {
+                    try
+                    {
+                        using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
+                        {
+                            await writer.WriteLineAsync(logMessage);
+                            //await writer.FlushAsync();
+                        }
+                    }
+                    catch (IOException)
+                    {
+                        try
+                        {
+                            await Task.Delay(_minWait);
+                            // Try one more time before raising an exception event.
+                            using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
+                            {
+                                await writer.WriteLineAsync(logMessage);
+                                //await writer.FlushAsync();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            RaiseException(ex);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        RaiseException(ex);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                RaiseException(new Exception($"The {nameof(TokenLogger)} is being forced to stop."));
+            }
+            await Task.Delay(_minWait);
+        }
+        Debug.WriteLine($"[INFO] Leaving {nameof(TokenLogger)} thread");
+    }
+
+    public override void Dispose()
+    {
+        if (_isDisposed)
+            return;
+
+        // For cases where object was newed-up and immediately disposed (like the test).
+        while (_logQueue.Count > 0) { Thread.Sleep(_minWait); }
+
+        _isDisposed = true;
+
+        // Stop the task and wait for it to finish.
+        _cts.Cancel();
+        // Stop accepting additions.
+        _logQueue.CompleteAdding();
+        try
+        {   // Wait for the processing task to finish
+            _processTask.Wait();
+        }
+        catch (AggregateException ex)
+        {
+            foreach (var innerException in ex.InnerExceptions)
+            {
+                Debug.WriteLine($"[WARNING] During task wait: {innerException.Message}");
+            }
+        }
+        _logQueue.Dispose();
+        _cts.Dispose();
+        base.Dispose();
+    }
+}
+#endregion
+
 #region [TestLogger]
 /// <summary>
 /// Basic test class.
@@ -466,7 +582,9 @@ public static class TestLogger
             log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
 
             log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
-            /** something extra could go here **/
+            /** 
+                something extra could go here 
+            **/
             log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
             
             Console.WriteLine($"{log.LogFilePath}");
@@ -479,7 +597,9 @@ public static class TestLogger
             log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
 
             log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
-            /** something extra could go here **/
+            /** 
+                something extra could go here 
+            **/
             log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
 
             Console.WriteLine($"{log.LogFilePath}");
@@ -492,7 +612,23 @@ public static class TestLogger
             log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
 
             log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
-            /** something extra could go here **/
+            /** 
+                something extra could go here 
+            **/
+            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
+
+            Console.WriteLine($"{log.LogFilePath}");
+        }
+
+        Console.WriteLine($"{Environment.NewLine}• Testing Token {nameof(LoggerBase)}…");
+        using (LoggerBase log = new TokenLogger(null))
+        {
+            log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+
+            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
+            /** 
+                something extra could go here 
+            **/
             log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
 
             Console.WriteLine($"{log.LogFilePath}");
