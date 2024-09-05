@@ -42,9 +42,9 @@ public abstract class LoggerBase : IDisposable
             _logFilePath = logFilePath;
         else
         {
-            //_logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.log");
-            try { _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetEntryAssembly().Location)}.log"); }
-            catch { _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetExecutingAssembly().Location)}.log"); }
+            // If null, we'll attempt to determine the caller and use that as the log file's name.
+            try { _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetEntryAssembly()?.Location)}.log"); }
+            catch (Exception) { _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetExecutingAssembly().Location)}.log"); }
         }
     }
 
@@ -253,9 +253,16 @@ public class BufferedLogger : LoggerBase
         }
         else
         {
-            _logQueue.Enqueue((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
-            if (_logQueue.Count > (_minWait * 10))
-                Task.Run(() => FlushLogBuffer());
+            try
+            {
+                _logQueue.Enqueue((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
+                if (_logQueue.Count > (_minWait * 10))
+                    Task.Run(() => FlushLogBuffer());
+            }
+            catch (Exception ex)
+            {
+                RaiseException(ex);
+            }
         }
     }
 
@@ -325,10 +332,6 @@ public class BufferedLogger : LoggerBase
         _flushTimer.Dispose();
 
         await FlushLogBuffer();
-        //int maxTries = _minWait * 2;
-        //var awaiter = FlushLogBuffer().GetAwaiter();
-        //while (!awaiter.IsCompleted && --maxTries > 0)
-        //    await Task.Delay(_minWait);
 
         try
         {
@@ -353,6 +356,10 @@ public class QueuedLogger : LoggerBase
     bool _threadRunning = true;
     BlockingCollection<Message> _collection;
 
+    /// <summary>
+    /// Base constructor
+    /// </summary>
+    /// <param name="logFilePath">full path to log file</param>
     public QueuedLogger(string logFilePath) : base(logFilePath)
     {
         _collection = new BlockingCollection<Message>();
@@ -371,7 +378,12 @@ public class QueuedLogger : LoggerBase
             }
 
             if (_collection.Count == 0)
+            {
+                _collection.CompleteAdding(); // do not accept more additions
                 _collection.Dispose();
+            }
+
+            Debug.WriteLine($"[INFO] Leaving {nameof(QueuedLogger)} thread");
         });
         // Set the priority and start it.
         thread.Priority = ThreadPriority.Lowest;
@@ -388,11 +400,21 @@ public class QueuedLogger : LoggerBase
         }
         else
         {
-            if (!_collection.TryAdd(new Message(value, level, time)))
+            try
             {
-                RaiseException(new Exception("Unable to add message to BlockingCollection"));
+                if (!_collection.TryAdd(new Message(value, level, time)))
+                {
+                    RaiseException(new Exception($"Unable to add message to {nameof(BlockingCollection<string>)}"));
+                }
             }
-            //m_Collection.CompleteAdding(); //marks the collection as not accepting any more additions
+            catch (InvalidOperationException)
+            {
+                RaiseException(new Exception($"Cannot add more to the {nameof(BlockingCollection<string>)}"));
+            }
+            catch (Exception ex)
+            {
+                RaiseException(ex);
+            }
         }
     }
 
@@ -400,6 +422,7 @@ public class QueuedLogger : LoggerBase
     {
         try
         {
+            // For cases where object was newed-up and immediately disposed (like the test).
             while (_collection.Count > 0)
                 FlushCollection();
         }
@@ -414,7 +437,7 @@ public class QueuedLogger : LoggerBase
 
     void FlushCollection()
     {
-        int maxTries = _minWait * 2;
+        int maxTries = _minWait;
         Message msg;
 
         if (_collection.TryTake(out msg))
@@ -437,7 +460,7 @@ public class QueuedLogger : LoggerBase
         }
         else
         {
-            RaiseException(new Exception("Unable to remove message from BlockingCollection!"));
+            RaiseException(new Exception($"Unable to remove message from {nameof(BlockingCollection<string>)}"));
         }
     }
 
@@ -469,6 +492,10 @@ public class TokenLogger :  LoggerBase
     readonly Task _processTask;
     bool _isDisposed = false;
 
+    /// <summary>
+    /// Base constructor
+    /// </summary>
+    /// <param name="logFilePath">full path to log file</param>
     public TokenLogger(string logFilePath) : base(logFilePath)
     {
         _logQueue = new BlockingCollection<string>();
@@ -484,12 +511,25 @@ public class TokenLogger :  LoggerBase
         if (level == LogLevel.OFF)
             Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
         else
-            _logQueue.Add((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
+        {
+            try
+            {
+                _logQueue?.TryAdd((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
+            }
+            catch (InvalidOperationException) 
+            {
+                RaiseException(new Exception($"Cannot add more to the {nameof(BlockingCollection<string>)}."));
+            }
+            catch (Exception ex)
+            {
+                RaiseException(ex);
+            }
+        }
     }
 
     async Task ProcessLogQueue(CancellationToken token)
     {
-        while (!_isDisposed)
+        do
         {
             try
             {
@@ -531,7 +571,9 @@ public class TokenLogger :  LoggerBase
                 RaiseException(new Exception($"The {nameof(TokenLogger)} is being forced to stop."));
             }
             await Task.Delay(_minWait);
-        }
+
+        } while (!_isDisposed);
+
         Debug.WriteLine($"[INFO] Leaving {nameof(TokenLogger)} thread");
     }
 
@@ -541,17 +583,18 @@ public class TokenLogger :  LoggerBase
             return;
 
         // For cases where object was newed-up and immediately disposed (like the test).
-        while (_logQueue.Count > 0) { Thread.Sleep(_minWait); }
+        //while (_logQueue.Count > 0) { Thread.Sleep(_minWait); }
+
+        // Stop accepting additions.
+        _logQueue?.CompleteAdding();
 
         _isDisposed = true;
 
-        // Stop the task and wait for it to finish.
-        _cts.Cancel();
-        // Stop accepting additions.
-        _logQueue.CompleteAdding();
+        //_cts.Cancel(); // moved, see below
+
         try
         {   // Wait for the processing task to finish
-            _processTask.Wait();
+            _processTask?.Wait();
         }
         catch (AggregateException ex)
         {
@@ -560,8 +603,11 @@ public class TokenLogger :  LoggerBase
                 Debug.WriteLine($"[WARNING] During task wait: {innerException.Message}");
             }
         }
-        _logQueue.Dispose();
+
+        // Moved this here so the loop can run minimum of once for fast disposal scenarios.
+        _cts.Cancel();
         _cts.Dispose();
+        _logQueue?.Dispose();
         base.Dispose();
     }
 }
@@ -621,7 +667,7 @@ public static class TestLogger
         }
 
         Console.WriteLine($"{Environment.NewLine}• Testing Token {nameof(LoggerBase)}…");
-        using (LoggerBase log = new TokenLogger(null))
+        using (LoggerBase log = new TokenLogger(""))
         {
             log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
 
