@@ -27,6 +27,7 @@ public enum LogLevel
 public abstract class LoggerBase : IDisposable
 {
     public event Action<Exception>? OnException;
+    protected Encoding _logFileEncoding = Encoding.UTF8;
     protected readonly int _minWait = 5; // milliseconds
     protected string _logFilePath;
     protected string _delimiter ="\t";
@@ -74,6 +75,15 @@ public abstract class LoggerBase : IDisposable
     {
         get => _delimiter;
         set => _delimiter = value;
+    }
+
+    /// <summary>
+    /// Gets or sets the file encoding.
+    /// </summary>
+    public virtual Encoding LogFileEncoding
+    {
+        get => _logFileEncoding;
+        set => _logFileEncoding = value;
     }
     #endregion
 
@@ -170,7 +180,7 @@ public class DeferredLogger : LoggerBase
         try
         {
             while (IsFileLocked(new FileInfo(_logFilePath)) && --maxTries > 0) { await Task.Delay(_minWait); }
-            using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
+            using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
             {
                 await writer.WriteLineAsync($"{message}");
                 //await writer.FlushAsync();
@@ -182,7 +192,7 @@ public class DeferredLogger : LoggerBase
             {
                 await Task.Delay(_minWait);
                 // Try one more time before raising an exception event.
-                using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
+                using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
                 {
                     await writer.WriteLineAsync($"{message}");
                     //await writer.FlushAsync();
@@ -278,7 +288,7 @@ public class BufferedLogger : LoggerBase
 
             if (_writeInsideWhile)
             {
-                using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
+                using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
                 {
                     while (_logQueue.TryDequeue(out var logMessage))
                     {
@@ -294,7 +304,7 @@ public class BufferedLogger : LoggerBase
                 {
                     sb.AppendLine(logMessage);
                 }
-                using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
+                using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
                 {
                     await writer.WriteAsync(sb.ToString());
                     //await writer.FlushAsync();
@@ -447,7 +457,7 @@ public class QueuedLogger : LoggerBase
                 while (_threadRunning && IsFileLocked(new FileInfo(_logFilePath)) && --maxTries > 0)
                     Thread.Sleep(_minWait);
 
-                using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
+                using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
                 {
                     writer.WriteLine((msg.time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{msg.level}{_delimiter}" : $"{msg.level}{_delimiter}") + $"{msg.text}");
                     //writer.Flush();
@@ -537,7 +547,7 @@ public class TokenLogger :  LoggerBase
                 {
                     try
                     {
-                        using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
+                        using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
                         {
                             await writer.WriteLineAsync(logMessage);
                             //await writer.FlushAsync();
@@ -549,7 +559,7 @@ public class TokenLogger :  LoggerBase
                         {
                             await Task.Delay(_minWait);
                             // Try one more time before raising an exception event.
-                            using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, Encoding.UTF8))
+                            using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
                             {
                                 await writer.WriteLineAsync(logMessage);
                                 //await writer.FlushAsync();
@@ -608,6 +618,136 @@ public class TokenLogger :  LoggerBase
         _cts.Cancel();
         _cts.Dispose();
         _logQueue?.Dispose();
+        base.Dispose();
+    }
+}
+#endregion
+
+#region [WaitHandleLogger]
+/// <summary>
+/// Simple deferred-style logger for non-blocked calls with file I/O.
+/// </summary>
+public class HandleLogger : LoggerBase
+{
+    EventWaitHandle ewhExit = new EventWaitHandle(false, EventResetMode.AutoReset);
+    EventWaitHandle ewhReady = new EventWaitHandle(false, EventResetMode.AutoReset);
+    Queue<string> logQueue = new Queue<string>();
+    volatile int requestCounter = 0;
+
+    /// <summary>
+    /// Base constructor
+    /// </summary>
+    /// <param name="logFilePath">full path to log file</param>
+    public HandleLogger(string logFilePath) : base(logFilePath)
+    {
+        Debug.WriteLine($"[INFO] {nameof(HandleLogger)} will write to \"{logFilePath}\"");
+        StartMonitor();
+    }
+
+    void StartMonitor()
+    {
+        ThreadPool.QueueUserWorkItem((obj) =>
+        {
+            EventWaitHandle[] handles = new EventWaitHandle[] { ewhExit, ewhReady };
+            while (EventWaitHandle.WaitAny(handles) != 0)
+            {
+                while (logQueue.Count > 0)
+                {
+                    lock (logQueue)
+                    {
+#if NET5_0_OR_GREATER
+                        if (logQueue.TryDequeue(out string? msg))
+                        {
+                            WriteToFile($"{msg}");
+                        }
+#else
+                        var msg = logQueue.Dequeue();
+                        WriteToFile($"{msg}");
+#endif
+                    }
+                }
+            }
+            Debug.WriteLine($"[INFO] Leaving {nameof(HandleLogger)} thread.");
+            //handles = null;
+        });
+    }
+
+    public override void Write(string message, LogLevel level, bool time)
+    {
+        if (level == LogLevel.OFF)
+            Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
+        else
+        {
+            lock (logQueue)
+            {
+                logQueue.Enqueue((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
+                ewhReady.Set();
+            }
+        }
+    }
+
+    void WriteToFile(string message)
+    {
+        try
+        {
+            Interlocked.Increment(ref requestCounter);
+
+            Debug.WriteLine($"[INFO] Write request {requestCounter} on thread #{Thread.CurrentThread.ManagedThreadId}");
+
+            using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
+            {
+                writer.WriteLine($"{message}");
+                //writer.Flush();
+            }
+        }
+        catch (Exception) /* typically permission or file-lock issue */
+        {
+            try
+            {
+                Thread.Sleep(_minWait);
+                // Try one more time before raising an exception event.
+                using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
+                {
+                    writer.WriteLine($"{message}");
+                    //writer.Flush();
+                }
+            }
+            catch (Exception ex)
+            {
+                RaiseException(ex);
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref requestCounter);
+        }
+    }
+
+    public override void Dispose()
+    {
+        ewhExit.Set();
+
+        // Flush any stragglers.
+        while (logQueue.Count > 0)
+        {
+            string msg = string.Empty;
+            lock (logQueue)
+            {
+#if NET5_0_OR_GREATER
+                if (logQueue.TryDequeue(out msg))
+                {
+                    WriteToFile($"{msg}");
+                }
+#else
+                if (logQueue.Count > 0)
+                {
+                    msg = logQueue.Dequeue();
+                    WriteToFile($"{msg}");
+                }
+#endif
+            }
+        }
+
         base.Dispose();
     }
 }
@@ -675,6 +815,23 @@ public static class TestLogger
             /** 
                 something extra could go here 
             **/
+            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
+
+            Console.WriteLine($"{log.LogFilePath}");
+        }
+
+        Console.WriteLine($"{Environment.NewLine}• Testing WaitHandle {nameof(LoggerBase)}…");
+        using (LoggerBase log = new HandleLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerHandle.txt")))
+        {
+            log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+
+            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
+
+            for (int i = 1; i < 21; i++)
+            {
+                log.Write($"Index #{i}");
+            }
+
             log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
 
             Console.WriteLine($"{log.LogFilePath}");
