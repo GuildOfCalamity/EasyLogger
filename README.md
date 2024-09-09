@@ -9,12 +9,20 @@
 | NET Framework | 4.8.1 |
 
 - A logger library which offers deferred writing so as to not block the main execution thread.
-- There are five flavors offered:
-	- Deferred Logger
-	- Buffered Logger
-	- Queued Logger
-	- Token Logger
-	- WaitHandle Logger
+- There are six flavors offered:
+	- **Deferred Logger**
+    	- A thread created for each write request via SemaphoreSlimEx.
+	- **Buffered Logger**
+    	- Threads created for each write that access a ConcurrentQueue with a Timer.
+	- **Queued Logger**
+    	- A background, low priority thread monitors a BlockingCollection.
+	- **Token Logger**
+    	- A task monitors a BlockingCollection via GetConsumingEnumerable.
+	- **WaitHandle Logger**
+    	- A traditional EventWaitHandle setup with one background thread accessing a Queue.
+	- **Interval Logger**
+    	- A background thread monitors a BlockingCollection with last-write interval checking.
+
 - This solution includes a console application for testing the logger DLL.
 - I've added a custom [SemaphoreSlim](https://learn.microsoft.com/en-us/dotnet/api/system.threading.semaphoreslim?view=netframework-4.8.1) for determining when it has been disposed. Ironically the BCL **SemaphoreSlim** does contain a **CheckDisposed()** method, but it's private.
 	- From the [Dispose](https://learn.microsoft.com/en-us/dotnet/api/system.threading.semaphoreslim.dispose?view=netframework-4.8.1) notes: "*Always call Dispose before you release your last reference to the SemaphoreSlim. Otherwise, the resources it is using will not be freed until the garbage collector calls the SemaphoreSlim object's Finalize method.*"
