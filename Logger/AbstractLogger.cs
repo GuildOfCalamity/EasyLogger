@@ -1,4 +1,4 @@
-using System;
+ï»¿using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
@@ -19,8 +19,7 @@ public enum LogLevel
     FATAL = 1 << 4,   // 2^4 (16)
 }
 
-// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+#region [Abstract LoggerBase]
 /// <summary>
 /// Simple deferred-style logger for non-blocked calls with file I/O.
 /// </summary>
@@ -144,6 +143,7 @@ public abstract class LoggerBase : IDisposable
     }
     #endregion
 }
+#endregion
 
 #region [DeferredLogger]
 /// <summary>
@@ -162,6 +162,9 @@ public class DeferredLogger : LoggerBase
         _semaphore = new SemaphoreSlimEx(1, 1);
     }
 
+    /// <summary>
+    /// Concurrency is not guaranteed.
+    /// </summary>
     public override void Write(string message, LogLevel level, bool time)
     {
         if (level == LogLevel.OFF)
@@ -379,7 +382,7 @@ public class QueuedLogger : LoggerBase
             while (_threadRunning)
             {
                 // NOTE: To use an enumerable with the collection you would call GetConsumingEnumerable()
-                //foreach (var item in _collection.GetConsumingEnumerable()) { Console.WriteLine($"Consuming: {item}"); }
+                //foreach (var item in _collection.GetConsumingEnumerable()) { Debug.WriteLine($"Consuming: {item}"); }
 
                 if (_collection.Count > 0)
                     FlushCollection();
@@ -393,7 +396,7 @@ public class QueuedLogger : LoggerBase
                 _collection.Dispose();
             }
 
-            Debug.WriteLine($"[INFO] Leaving {nameof(QueuedLogger)} thread");
+            Debug.WriteLine($"[INFO] Leaving {Thread.CurrentThread.Name} thread");
         });
         // Set the priority and start it.
         thread.Priority = ThreadPriority.Lowest;
@@ -414,12 +417,12 @@ public class QueuedLogger : LoggerBase
             {
                 if (!_collection.TryAdd(new Message(value, level, time)))
                 {
-                    RaiseException(new Exception($"Unable to add message to {nameof(BlockingCollection<string>)}"));
+                    RaiseException(new Exception($"Unable to add message to {nameof(BlockingCollection<Message>)}"));
                 }
             }
             catch (InvalidOperationException)
             {
-                RaiseException(new Exception($"Cannot add more to the {nameof(BlockingCollection<string>)}"));
+                RaiseException(new Exception($"Cannot add more to the {nameof(BlockingCollection<Message>)}"));
             }
             catch (Exception ex)
             {
@@ -470,7 +473,7 @@ public class QueuedLogger : LoggerBase
         }
         else
         {
-            RaiseException(new Exception($"Unable to remove message from {nameof(BlockingCollection<string>)}"));
+            RaiseException(new Exception($"Unable to remove message from {nameof(BlockingCollection<Message>)}"));
         }
     }
 
@@ -580,11 +583,12 @@ public class TokenLogger :  LoggerBase
             {
                 RaiseException(new Exception($"The {nameof(TokenLogger)} is being forced to stop."));
             }
+            
             await Task.Delay(_minWait);
 
         } while (!_isDisposed);
 
-        Debug.WriteLine($"[INFO] Leaving {nameof(TokenLogger)} thread");
+        Debug.WriteLine($"[INFO] Leaving {Thread.CurrentThread.Name} thread");
     }
 
     public override void Dispose()
@@ -640,7 +644,6 @@ public class HandleLogger : LoggerBase
     /// <param name="logFilePath">full path to log file</param>
     public HandleLogger(string logFilePath) : base(logFilePath)
     {
-        Debug.WriteLine($"[INFO] {nameof(HandleLogger)} will write to \"{logFilePath}\"");
         StartMonitor();
     }
 
@@ -648,6 +651,7 @@ public class HandleLogger : LoggerBase
     {
         ThreadPool.QueueUserWorkItem((obj) =>
         {
+            Thread.CurrentThread.Name = "HandleLogger";
             EventWaitHandle[] handles = new EventWaitHandle[] { ewhExit, ewhReady };
             while (EventWaitHandle.WaitAny(handles) != 0)
             {
@@ -667,7 +671,7 @@ public class HandleLogger : LoggerBase
                     }
                 }
             }
-            Debug.WriteLine($"[INFO] Leaving {nameof(HandleLogger)} thread.");
+            Debug.WriteLine($"[INFO] Leaving {Thread.CurrentThread.Name} thread.");
             //handles = null;
         });
     }
@@ -691,8 +695,7 @@ public class HandleLogger : LoggerBase
         try
         {
             Interlocked.Increment(ref requestCounter);
-
-            Debug.WriteLine($"[INFO] Write request {requestCounter} on thread #{Thread.CurrentThread.ManagedThreadId}");
+            //Debug.WriteLine($"[INFO] Write request {requestCounter} on thread #{Thread.CurrentThread.ManagedThreadId}");
 
             using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
             {
@@ -753,6 +756,184 @@ public class HandleLogger : LoggerBase
 }
 #endregion
 
+#region [IntervalLogger]
+/// <summary>
+/// Creates a <see cref="System.Threading.Thread"/> that watches the 
+/// <see cref="System.Collections.Concurrent.BlockingCollection{T}"/> 
+/// for items to try and write to storage.
+/// </summary>
+public class IntervalLogger : LoggerBase
+{
+    bool _threadRunning = true;
+    BlockingCollection<Message> _collection;
+    DateTime _lastWrite;
+    TimeSpan _writeInterval;
+
+    /// <summary>
+    /// Base constructor
+    /// </summary>
+    /// <param name="logFilePath">full path to log file</param>
+    public IntervalLogger(string logFilePath, TimeSpan writeInterval) : base(logFilePath)
+    {
+        // Make sure we write at least once on creation.
+        _lastWrite = DateTime.Now.Subtract(writeInterval);
+        _writeInterval = writeInterval;
+        _collection = new BlockingCollection<Message>();
+        // Configure our writing thread delegate.
+        Thread thread = new Thread(() =>
+        {
+            while (_threadRunning)
+            {
+                // NOTE: To use an enumerable with the collection you would call GetConsumingEnumerable()
+                //foreach (var item in _collection.GetConsumingEnumerable()) { Debug.WriteLine($"Consuming: {item}"); }
+
+                TimeSpan elapsed = DateTime.Now - _lastWrite;
+                if (_collection.Count > 0 && IsAllowed())
+                {
+                    _lastWrite = DateTime.Now;
+                    FlushCollection();
+                }
+                else
+                    Thread.Sleep(_minWait);
+            }
+
+            if (_collection.Count == 0)
+            {
+                _collection.CompleteAdding(); // do not accept more additions
+                _collection.Dispose();
+            }
+
+            Debug.WriteLine($"[INFO] Leaving {Thread.CurrentThread.Name} thread");
+        });
+        // Set the priority and start it.
+        thread.Priority = ThreadPriority.Lowest;
+        thread.IsBackground = true;
+        thread.Name = "IntervalLogger";
+        thread.Start();
+    }
+
+    /// <summary>
+    /// Gets or sets the writing interval.
+    /// </summary>
+    public TimeSpan WriteInterval
+    {
+        get => _writeInterval;
+        set => _writeInterval = value;
+    }
+
+    public bool IsAllowed()
+    {
+        TimeSpan elapsed = DateTime.Now - _lastWrite;
+        return elapsed >= _writeInterval;
+    }
+
+    public override void Write(string value, LogLevel level, bool time = true)
+    {
+        if (level == LogLevel.OFF)
+        {
+            Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{value}");
+        }
+        else
+        {
+            try
+            {
+                if (!_collection.TryAdd(new Message(value, level, time)))
+                {
+                    RaiseException(new Exception($"Unable to add message to {nameof(BlockingCollection<Message>)}"));
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                RaiseException(new Exception($"Cannot add more to the {nameof(BlockingCollection<Message>)}"));
+            }
+            catch (Exception ex)
+            {
+                RaiseException(ex);
+            }
+        }
+    }
+
+    public override void Dispose()
+    {
+        try
+        {
+            // For cases where object was newed-up and immediately disposed.
+            while (_collection.Count > 0)
+                FlushCollection();
+        }
+        catch (Exception ex)
+        {
+            RaiseException(ex);
+        }
+
+        _threadRunning = false;
+        base.Dispose();
+    }
+
+    void FlushCollection()
+    {
+        while (_collection.Count > 0)
+        {
+            Message msg;
+            try
+            {
+                if (_collection.TryTake(out msg))
+                {
+                    try
+                    {
+                        using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
+                        {
+                            writer.WriteLine((msg.time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{msg.level}{_delimiter}" : $"{msg.level}{_delimiter}") + $"{msg.text}");
+                            //writer.Flush();
+                        }
+                    }
+                    catch (Exception) /* typically permission or file-lock issue */
+                    {
+                        try
+                        {
+                            // Try one more time before raising an exception event.
+                            Thread.Sleep(_minWait);
+                            using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
+                            {
+                                writer.WriteLine((msg.time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{msg.level}{_delimiter}" : $"{msg.level}{_delimiter}") + $"{msg.text}");
+                                //writer.Flush();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            RaiseException(ex);
+                        }
+                    }
+                }
+                else
+                {
+                    RaiseException(new Exception($"Unable to remove message from {nameof(BlockingCollection<Message>)}"));
+                }
+            }
+            catch (Exception ex) /* blocking collection error */
+            {
+                RaiseException(ex);
+            }
+        }
+    }
+
+    #region [Message structure]
+    struct Message
+    {
+        public LogLevel level;
+        public string text;
+        public bool time;
+        public Message(string value, LogLevel level, bool time)
+        {
+            this.text = value;
+            this.time = time;
+            this.level = level;
+        }
+    }
+    #endregion
+}
+#endregion
+
 #region [TestLogger]
 /// <summary>
 /// Basic test class.
@@ -761,7 +942,8 @@ public static class TestLogger
 {
     public static void Run()
     {
-        Console.WriteLine($"{Environment.NewLine}• Testing Deferred {nameof(LoggerBase)}…");
+        // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        Console.WriteLine($"{Environment.NewLine}â€¢ Testing Deferred {nameof(LoggerBase)}â€¦");
         using (LoggerBase log = new DeferredLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerDeferred.txt")))
         {
             log.TimeFormat = "yyyy-MM-dd hh:mm:ss.fff tt";
@@ -776,7 +958,8 @@ public static class TestLogger
             Console.WriteLine($"{log.LogFilePath}");
         }
 
-        Console.WriteLine($"{Environment.NewLine}• Testing Buffered {nameof(LoggerBase)}…");
+        // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        Console.WriteLine($"{Environment.NewLine}â€¢ Testing Buffered {nameof(LoggerBase)}â€¦");
         using (LoggerBase log = new BufferedLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerBuffered.txt")))
         {
             log.TimeFormat = "MM-dd-yyyy hh:mm:ss.fff tt";
@@ -791,7 +974,8 @@ public static class TestLogger
             Console.WriteLine($"{log.LogFilePath}");
         }
 
-        Console.WriteLine($"{Environment.NewLine}• Testing Queued {nameof(LoggerBase)}…");
+        // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        Console.WriteLine($"{Environment.NewLine}â€¢ Testing Queued {nameof(LoggerBase)}â€¦");
         using (LoggerBase log = new QueuedLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerQueued.txt")))
         {
             log.TimeFormat = "MM/dd/yyyy hh:mm:ss.fff tt";
@@ -806,7 +990,8 @@ public static class TestLogger
             Console.WriteLine($"{log.LogFilePath}");
         }
 
-        Console.WriteLine($"{Environment.NewLine}• Testing Token {nameof(LoggerBase)}…");
+        // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        Console.WriteLine($"{Environment.NewLine}â€¢ Testing Token {nameof(LoggerBase)}â€¦");
         using (LoggerBase log = new TokenLogger(""))
         {
             log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
@@ -820,7 +1005,8 @@ public static class TestLogger
             Console.WriteLine($"{log.LogFilePath}");
         }
 
-        Console.WriteLine($"{Environment.NewLine}• Testing WaitHandle {nameof(LoggerBase)}…");
+        // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        Console.WriteLine($"{Environment.NewLine}â€¢ Testing WaitHandle {nameof(LoggerBase)}â€¦");
         using (LoggerBase log = new HandleLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerHandle.txt")))
         {
             log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
@@ -836,6 +1022,29 @@ public static class TestLogger
 
             Console.WriteLine($"{log.LogFilePath}");
         }
+
+        // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        // This test is different since we want to keep the object around for some time to test interval writing.
+        Console.WriteLine($"{Environment.NewLine}â€¢ Testing Interval {nameof(LoggerBase)}â€¦");
+        LoggerBase iLog = new IntervalLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerInterval.txt"), TimeSpan.FromSeconds(10));
+        ((IntervalLogger)iLog).WriteInterval = TimeSpan.FromSeconds(2); // Example of changing time interval after object creation.
+        iLog.LogFileEncoding = Encoding.ASCII; // Example of changing file encoding after object creation.
+        iLog.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+        iLog.Write($"{iLog.GetType()?.Name} of base type {iLog.GetType()?.BaseType?.Name} - Test started.");
+        for (int i = 1; i < 11; i++) 
+        {
+            Thread.Sleep(10);
+            while (!((IntervalLogger)iLog).IsAllowed()) 
+            { 
+                Console.Write($"â€¢");
+                Thread.Sleep(333); 
+            }
+            iLog.Write($"Index #{i}");
+        }
+        Console.WriteLine();
+        iLog.Write($"{iLog.GetType()?.Name} of base type {iLog.GetType()?.BaseType?.Name} - Test finished.");
+        Console.WriteLine($"{iLog.LogFilePath}");
+        iLog.Dispose();
     }
 }
 #endregion
