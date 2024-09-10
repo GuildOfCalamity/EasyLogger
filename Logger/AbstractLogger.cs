@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 
 namespace Logger;
 
+#region [Supporting Structs]
 public enum LogLevel
 {
     OFF = 0,
@@ -18,6 +19,20 @@ public enum LogLevel
     ERROR = 1 << 3,   // 2^3 (8)
     FATAL = 1 << 4,   // 2^4 (16)
 }
+
+public struct Message
+{
+    public LogLevel level;
+    public string text;
+    public bool time;
+    public Message(string value, LogLevel level, bool time)
+    {
+        this.text = value;
+        this.time = time;
+        this.level = level;
+    }
+}
+#endregion
 
 #region [Abstract LoggerBase]
 /// <summary>
@@ -145,97 +160,13 @@ public abstract class LoggerBase : IDisposable
 }
 #endregion
 
-#region [DeferredLogger]
-/// <summary>
-/// Simple deferred-style logger for non-blocked calls with file I/O.
-/// </summary>
-public class DeferredLogger : LoggerBase
-{
-    private readonly SemaphoreSlimEx _semaphore;
-
-    /// <summary>
-    /// Base constructor
-    /// </summary>
-    /// <param name="logFilePath">full path to log file</param>
-    public DeferredLogger(string logFilePath) : base(logFilePath)
-    {
-        _semaphore = new SemaphoreSlimEx(1, 1);
-    }
-
-    /// <summary>
-    /// Concurrency is not guaranteed.
-    /// </summary>
-    public override void Write(string message, LogLevel level, bool time)
-    {
-        if (level == LogLevel.OFF)
-            Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
-        else
-            Task.Run(async () => await WriteLogToFileAsync((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}"));
-    }
-
-    async Task WriteLogToFileAsync(string message)
-    {
-        int maxTries = _minWait * 2;
-
-        if (!_semaphore.IsDisposed)
-            await _semaphore?.WaitAsync();
-
-        try
-        {
-            while (IsFileLocked(new FileInfo(_logFilePath)) && --maxTries > 0) { await Task.Delay(_minWait); }
-            using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
-            {
-                await writer.WriteLineAsync($"{message}");
-                //await writer.FlushAsync();
-            }
-        }
-        catch (Exception) /* typically permission or file-lock issue */
-        {
-            try
-            {
-                await Task.Delay(_minWait);
-                // Try one more time before raising an exception event.
-                using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
-                {
-                    await writer.WriteLineAsync($"{message}");
-                    //await writer.FlushAsync();
-                }
-            }
-            catch (Exception ex)
-            {
-                RaiseException(ex);
-            }
-        }
-        finally
-        {
-            try
-            {
-                // https://learn.microsoft.com/en-us/dotnet/api/system.threading.semaphoreslim.release
-                // A call to the Release() method increments the CurrentCount property by one.
-                // If the value of the CurrentCount property is zero before this method is called,
-                // the method also allows one thread or task blocked by a call to the Wait or
-                // WaitAsync method to enter the semaphore.
-                if (!_semaphore.IsDisposed && _semaphore.CurrentCount < 1)
-                    _semaphore?.Release();
-            }
-            catch (Exception) { }
-        }
-    }
-
-    public override void Dispose()
-    {
-        if (!_semaphore.IsDisposed)
-            _semaphore?.Dispose();
-
-        base.Dispose();
-    }
-}
-#endregion
-
 #region [BufferedLogger]
 /// <summary>
 /// Simple deferred-style logger for non-blocked calls with file I/O.
 /// </summary>
+/// <remarks>
+/// This logger uses a <see cref="ConcurrentQueue{T}"/> to store the requests.
+/// </remarks>
 public class BufferedLogger : LoggerBase
 {
     readonly ConcurrentQueue<string> _logQueue;
@@ -476,21 +407,6 @@ public class QueuedLogger : LoggerBase
             RaiseException(new Exception($"Unable to remove message from {nameof(BlockingCollection<Message>)}"));
         }
     }
-
-    #region [Message structure]
-    struct Message
-    {
-        public LogLevel level;
-        public string text;
-        public bool time;
-        public Message(string value, LogLevel level, bool time)
-        {
-            this.text = value;
-            this.time = time;
-            this.level = level;
-        }
-    }
-    #endregion
 }
 #endregion
 
@@ -498,6 +414,9 @@ public class QueuedLogger : LoggerBase
 /// <summary>
 /// Simple deferred-style logger for non-blocked calls with file I/O.
 /// </summary>
+/// <remarks>
+/// This logger uses a <see cref="BlockingCollection{T}"/> to store the requests.
+/// </remarks>
 public class TokenLogger :  LoggerBase
 {
     readonly BlockingCollection<string> _logQueue;
@@ -627,10 +546,101 @@ public class TokenLogger :  LoggerBase
 }
 #endregion
 
+#region [DeferredLogger]
+/// <summary>
+/// Simple deferred-style logger for non-blocked calls with file I/O.
+/// </summary>
+/// <remarks>
+/// Concurrency is not guaranteed in the <see cref="DeferredLogger"/>, 
+/// since each write will have it's own thread assigned. 
+/// The <see cref="SemaphoreSlimEx"/> should help with the effect.
+/// </remarks>
+public class DeferredLogger : LoggerBase
+{
+    private readonly SemaphoreSlimEx _semaphore;
+
+    /// <summary>
+    /// Base constructor
+    /// </summary>
+    /// <param name="logFilePath">full path to log file</param>
+    public DeferredLogger(string logFilePath) : base(logFilePath)
+    {
+        _semaphore = new SemaphoreSlimEx(1, 10);
+    }
+
+    public override void Write(string message, LogLevel level, bool time)
+    {
+        if (level == LogLevel.OFF)
+            Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
+        else
+            Task.Run(async () => await WriteToLogFileAsync((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}"));
+    }
+
+    async Task WriteToLogFileAsync(string message)
+    {
+        int maxTries = _minWait;
+
+        if (!_semaphore.IsDisposed)
+            await _semaphore?.WaitAsync();
+
+        try
+        {
+            while (IsFileLocked(new FileInfo(_logFilePath)) && --maxTries > 0) { await Task.Delay(_minWait); }
+            using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
+            {
+                await writer.WriteLineAsync($"{message}");
+                //await writer.FlushAsync();
+            }
+        }
+        catch (Exception) /* typically permission or file-lock issue */
+        {
+            try
+            {
+                await Task.Delay(_minWait);
+                // Try one more time before raising an exception event.
+                using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
+                {
+                    await writer.WriteLineAsync($"{message}");
+                    //await writer.FlushAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                RaiseException(ex);
+            }
+        }
+        finally
+        {
+            try
+            {   // https://learn.microsoft.com/en-us/dotnet/api/system.threading.semaphoreslim.release
+                // A call to the Release() method increments the CurrentCount property by one.
+                // If the value of the CurrentCount property is zero before this method is called,
+                // the method also allows one thread or task blocked by a call to the Wait or
+                // WaitAsync method to enter the semaphore.
+                if (!_semaphore.IsDisposed)
+                    _semaphore?.Release();
+            }
+            catch (Exception) { }
+        }
+    }
+
+    public override void Dispose()
+    {
+        if (!_semaphore.IsDisposed)
+            _semaphore?.Dispose();
+
+        base.Dispose();
+    }
+}
+#endregion
+
 #region [WaitHandleLogger]
 /// <summary>
 /// Simple deferred-style logger for non-blocked calls with file I/O.
 /// </summary>
+/// <remarks>
+/// This logger uses a <see cref="Queue{T}"/> to store the requests.
+/// </remarks>
 public class HandleLogger : LoggerBase
 {
     EventWaitHandle ewhExit = new EventWaitHandle(false, EventResetMode.AutoReset);
@@ -856,9 +866,8 @@ public class IntervalLogger : LoggerBase
     public override void Dispose()
     {
         try
-        {
-            // For cases where object was newed-up and immediately disposed.
-            while (_collection.Count > 0)
+        {   // For cases where object was newed-up and immediately disposed.
+            if (_collection.Count > 0)
                 FlushCollection();
         }
         catch (Exception ex)
@@ -916,135 +925,162 @@ public class IntervalLogger : LoggerBase
             }
         }
     }
-
-    #region [Message structure]
-    struct Message
-    {
-        public LogLevel level;
-        public string text;
-        public bool time;
-        public Message(string value, LogLevel level, bool time)
-        {
-            this.text = value;
-            this.time = time;
-            this.level = level;
-        }
-    }
-    #endregion
 }
 #endregion
 
-#region [TestLogger]
+#region [HashSetLogger]
 /// <summary>
-/// Basic test class.
+/// Creates a <see cref="System.Threading.Thread"/> that watches the 
+/// <see cref="System.Collections.Generic.HashSet{T}"/>  for items to 
+/// add to the <see cref="BlockingCollection{T}"/> and then write.
 /// </summary>
-public static class TestLogger
+public class HashSetLogger : LoggerBase
 {
-    public static void Run()
+    bool _working = false;
+    bool _threadRunning = true;
+    double _daysUntilWipe = 1;
+    DateTime _lastClear;
+    HashSet<Message> _collection;
+    BlockingCollection<string> _output;
+
+    /// <summary>
+    /// Base constructor
+    /// </summary>
+    /// <param name="logFilePath">full path to log file</param>
+    public HashSetLogger(string logFilePath) : base(logFilePath)
     {
-        // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        Console.WriteLine($"{Environment.NewLine}• Testing Deferred {nameof(LoggerBase)}…");
-        using (LoggerBase log = new DeferredLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerDeferred.txt")))
+        _lastClear = DateTime.Now;
+        _collection = new HashSet<Message>();
+        _output = new BlockingCollection<string>();
+
+        // Configure our set monitoring delegate.
+        Thread thread = new Thread(() =>
         {
-            log.TimeFormat = "yyyy-MM-dd hh:mm:ss.fff tt";
-            log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
-
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
-            /** 
-                something extra could go here 
-            **/
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
-            
-            Console.WriteLine($"{log.LogFilePath}");
-        }
-
-        // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        Console.WriteLine($"{Environment.NewLine}• Testing Buffered {nameof(LoggerBase)}…");
-        using (LoggerBase log = new BufferedLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerBuffered.txt")))
-        {
-            log.TimeFormat = "MM-dd-yyyy hh:mm:ss.fff tt";
-            log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
-
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
-            /** 
-                something extra could go here 
-            **/
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
-
-            Console.WriteLine($"{log.LogFilePath}");
-        }
-
-        // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        Console.WriteLine($"{Environment.NewLine}• Testing Queued {nameof(LoggerBase)}…");
-        using (LoggerBase log = new QueuedLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerQueued.txt")))
-        {
-            log.TimeFormat = "MM/dd/yyyy hh:mm:ss.fff tt";
-            log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
-
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
-            /** 
-                something extra could go here 
-            **/
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
-
-            Console.WriteLine($"{log.LogFilePath}");
-        }
-
-        // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        Console.WriteLine($"{Environment.NewLine}• Testing Token {nameof(LoggerBase)}…");
-        using (LoggerBase log = new TokenLogger(""))
-        {
-            log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
-
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
-            /** 
-                something extra could go here 
-            **/
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
-
-            Console.WriteLine($"{log.LogFilePath}");
-        }
-
-        // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        Console.WriteLine($"{Environment.NewLine}• Testing WaitHandle {nameof(LoggerBase)}…");
-        using (LoggerBase log = new HandleLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerHandle.txt")))
-        {
-            log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
-
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
-
-            for (int i = 1; i < 21; i++)
+            while (_threadRunning)
             {
-                log.Write($"Index #{i}");
+                Thread.Sleep(_minWait);
+
+                // By default, we clear the buffer once per day.
+                if ((DateTime.Now - _lastClear).TotalDays >= _daysUntilWipe && !_working)
+                {
+                    _lastClear = DateTime.Now;
+                    lock (_collection)
+                    {
+                        _collection.Clear();
+                    }
+                }
+
+                if (_output.Count > 0)
+                    FlushOutput();
+
             }
+            Debug.WriteLine($"[INFO] Leaving {Thread.CurrentThread.Name} thread");
+            _collection.Clear();
+        });
+        // Set the priority and start it.
+        thread.Priority = ThreadPriority.Lowest;
+        thread.IsBackground = true;
+        thread.Name = "HashSetLogger";
+        thread.Start();
+    }
 
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
+    /// <summary>
+    /// Gets or sets how many days elapse before flushing the hash set.
+    /// </summary>
+    /// <remarks>The default is one day.</remarks>
+    public double DaysUntilWipe
+    {
+        get => _daysUntilWipe;
+        set => _daysUntilWipe = value;
+    }
 
-            Console.WriteLine($"{log.LogFilePath}");
-        }
-
-        // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        // This test is different since we want to keep the object around for some time to test interval writing.
-        Console.WriteLine($"{Environment.NewLine}• Testing Interval {nameof(LoggerBase)}…");
-        LoggerBase iLog = new IntervalLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerInterval.txt"), TimeSpan.FromSeconds(10));
-        ((IntervalLogger)iLog).WriteInterval = TimeSpan.FromSeconds(2); // Example of changing time interval after object creation.
-        iLog.LogFileEncoding = Encoding.ASCII; // Example of changing file encoding after object creation.
-        iLog.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
-        iLog.Write($"{iLog.GetType()?.Name} of base type {iLog.GetType()?.BaseType?.Name} - Test started.");
-        for (int i = 1; i < 11; i++) 
+    public override void Write(string value, LogLevel level, bool time = true)
+    {
+        if (level == LogLevel.OFF)
         {
-            Thread.Sleep(10);
-            while (!((IntervalLogger)iLog).IsAllowed()) 
-            { 
-                Console.Write($"•");
-                Thread.Sleep(333); 
-            }
-            iLog.Write($"Index #{i}");
+            Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{value}");
         }
-        Console.WriteLine();
-        iLog.Write($"{iLog.GetType()?.Name} of base type {iLog.GetType()?.BaseType?.Name} - Test finished.");
-        Console.WriteLine($"{iLog.LogFilePath}");
-        iLog.Dispose();
+        else
+        {
+            try
+            {
+                _working = true;
+                lock (_collection)
+                {
+                    var msg = new Message(value, level, time);
+                    if (!_collection.Add(msg))
+                    {
+                        Debug.WriteLine($"[INFO] This message already exists in the collection and will be skipped.");
+                    }
+                    else
+                    {
+                        _output.Add((msg.time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{msg.level}{_delimiter}" : $"{msg.level}{_delimiter}") + $"{msg.text}");
+                    }
+                }
+            }
+            catch (Exception) { }
+            finally { _working = false; }
+        }
+    }
+
+    void FlushOutput()
+    {
+        while (_output.Count > 0)
+        {
+            try
+            {
+                string? msg;
+                if (_output.TryTake(out msg))
+                {
+                    try
+                    {
+                        using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
+                        {
+                            writer.WriteLine($"{msg}");
+                        }
+                    }
+                    catch (Exception) /* typically permission or file-lock issue */
+                    {
+                        try
+                        {
+                            // Try one more time before raising an exception event.
+                            Thread.Sleep(_minWait);
+                            using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
+                            {
+                                writer.WriteLine($"{msg}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            RaiseException(ex);
+                        }
+                    }
+                }
+                else
+                {
+                    RaiseException(new Exception($"Unable to remove message from {nameof(BlockingCollection<string>)}"));
+                }
+            }
+            catch (Exception ex)
+            {
+                RaiseException(ex);
+            }
+        }
+    }
+
+    public override void Dispose()
+    {
+        try
+        {   // For cases where object was newed-up and immediately disposed.
+            if (_collection.Count > 0)
+                FlushOutput();
+        }
+        catch (Exception ex)
+        {
+            RaiseException(ex);
+        }
+        _threadRunning = false;
+        base.Dispose();
     }
 }
 #endregion
