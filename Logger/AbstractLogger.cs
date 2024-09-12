@@ -184,7 +184,7 @@ public class BufferedLogger : LoggerBase
     public BufferedLogger(string logFilePath, int flushInterval = 4000) : base(logFilePath)
     {
         _logQueue = new ConcurrentQueue<string>();
-        _semaphore = new SemaphoreSlimEx(1, 1);
+        _semaphore = new SemaphoreSlimEx(1, 10);
         _flushInterval = flushInterval;
         _flushTimer = new System.Threading.Timer(async _ => await FlushLogBuffer(), null, _flushInterval, _flushInterval);
     }
@@ -215,7 +215,7 @@ public class BufferedLogger : LoggerBase
         try
         {
             if (!_semaphore.IsDisposed)
-                await _semaphore?.WaitAsync();
+                await _semaphore.WaitAsync().ConfigureAwait(false);
 
             if (_logQueue.IsEmpty)
                 return;
@@ -258,7 +258,7 @@ public class BufferedLogger : LoggerBase
                 // If the value of the CurrentCount property is zero before this method is called,
                 // the method also allows one thread or task blocked by a call to the Wait or
                 // WaitAsync method to enter the semaphore.
-                if (!_semaphore.IsDisposed && _semaphore.CurrentCount < 1)
+                if (!_semaphore.IsDisposed)
                     _semaphore?.Release();
             }
             catch (Exception) { }
@@ -478,9 +478,8 @@ public class TokenLogger :  LoggerBase
                     catch (IOException)
                     {
                         try
-                        {
+                        {   // Try one more time before raising an exception event.
                             await Task.Delay(_minWait);
-                            // Try one more time before raising an exception event.
                             using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
                             {
                                 await writer.WriteLineAsync(logMessage);
@@ -515,9 +514,6 @@ public class TokenLogger :  LoggerBase
         if (_isDisposed)
             return;
 
-        // For cases where object was newed-up and immediately disposed (like the test).
-        //while (_logQueue.Count > 0) { Thread.Sleep(_minWait); }
-
         // Stop accepting additions.
         _logQueue?.CompleteAdding();
 
@@ -531,13 +527,14 @@ public class TokenLogger :  LoggerBase
         }
         catch (AggregateException ex)
         {
-            foreach (var innerException in ex.InnerExceptions)
+            ex.Flatten().Handle(ex =>
             {
-                Debug.WriteLine($"[WARNING] During task wait: {innerException.Message}");
-            }
+                Debug.WriteLine($"[WARNING] Type:{ex.GetType()}  Message:{ex.Message}");
+                return true;
+            });
         }
 
-        // Moved this here so the loop can run minimum of once for fast disposal scenarios.
+        // Moved this here so the loop can run minimum of once for immediate disposal scenarios.
         _cts.Cancel();
         _cts.Dispose();
         _logQueue?.Dispose();
@@ -553,11 +550,11 @@ public class TokenLogger :  LoggerBase
 /// <remarks>
 /// Concurrency is not guaranteed in the <see cref="DeferredLogger"/>, 
 /// since each write will have it's own thread assigned. 
-/// The <see cref="SemaphoreSlimEx"/> should help with the effect.
+/// The <see cref="SemaphoreSlimEx"/> should help with the issue.
 /// </remarks>
 public class DeferredLogger : LoggerBase
 {
-    private readonly SemaphoreSlimEx _semaphore;
+    readonly SemaphoreSlimEx _semaphore;
 
     /// <summary>
     /// Base constructor
@@ -581,7 +578,7 @@ public class DeferredLogger : LoggerBase
         int maxTries = _minWait;
 
         if (!_semaphore.IsDisposed)
-            await _semaphore?.WaitAsync();
+            await _semaphore.WaitAsync().ConfigureAwait(false);
 
         try
         {
