@@ -20,7 +20,7 @@ public class Program
         #endregion
 
         TestLoggers.Run();
-
+        
         PressKeyTo("EXIT", ConsoleKey.Escape);
     }
 
@@ -72,149 +72,222 @@ public class Program
 
 #region [Testing]
 /// <summary>
-/// Basic test class.
+/// Basic test class for
+/// <see cref="BufferedLogger"/>
+/// <see cref="QueuedLogger"/>
+/// <see cref="TokenLogger"/>
+/// <see cref="HandleLogger"/>
+/// <see cref="DeferredLogger"/>
+/// <see cref="HashSetLogger"/>
+/// <see cref="IntervalLogger"/>
 /// </summary>
 public static class TestLoggers
 {
     public static void Run()
     {
+        int maxCount = 10;
+
         #region [BufferedLogger]
-        Console.WriteLine($"{Environment.NewLine}• Testing Buffered {nameof(LoggerBase)}…");
-        using (LoggerBase log = new BufferedLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerBuffered.txt")))
+        using (StopClock sc = new StopClock(color: ConsoleColor.Yellow))
         {
-            log.TimeFormat = "MM-dd-yyyy hh:mm:ss.fff tt";
-            log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
-
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
-            /** 
-                something extra could go here 
-            **/
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
-
-            Console.WriteLine($"{log.LogFilePath}");
+            Console.WriteLine($"{Environment.NewLine}• Testing Buffered {nameof(LoggerBase)}…");
+            using (LoggerBase log = new BufferedLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerBuffered.txt")))
+            {
+                log.TimeFormat = "MM-dd-yyyy hh:mm:ss.fff tt";
+                log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
+                for (int i = 1; i < maxCount + 1; i++) // test concurrency
+                {
+                    log.Write($"Index #{i}");
+                }
+                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
+                Console.WriteLine($"{log.LogFilePath}");
+            }
         }
         #endregion
 
         #region [QueuedLogger]
-        Console.WriteLine($"{Environment.NewLine}• Testing Queued {nameof(LoggerBase)}…");
-        using (LoggerBase log = new QueuedLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerQueued.txt")))
+        using (StopClock sc = new StopClock(color: ConsoleColor.Cyan))
         {
-            log.TimeFormat = "MM/dd/yyyy hh:mm:ss.fff tt";
-            log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
-
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
-            /** 
-                something extra could go here 
-            **/
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
-
-            Console.WriteLine($"{log.LogFilePath}");
+            Console.WriteLine($"{Environment.NewLine}• Testing Queued {nameof(LoggerBase)}…");
+            using (LoggerBase log = new QueuedLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerQueued.txt")))
+            {
+                log.TimeFormat = "MM/dd/yyyy hh:mm:ss.fff tt";
+                log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
+                for (int i = 1; i < maxCount + 1; i++) // test concurrency
+                {
+                    log.Write($"Index #{i}");
+                }
+                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
+                Console.WriteLine($"{log.LogFilePath}");
+            }
         }
         #endregion
 
         #region [TokenLogger]
-        Console.WriteLine($"{Environment.NewLine}• Testing Token {nameof(LoggerBase)}…");
-        using (LoggerBase log = new TokenLogger("")) // Let the logger decide on the file name.
+        using (StopClock sc = new StopClock(color: ConsoleColor.Magenta))
         {
-            log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
-
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
-            /** 
-                something extra could go here 
-            **/
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
-
-            Console.WriteLine($"{log.LogFilePath}");
+            Console.WriteLine($"{Environment.NewLine}• Testing Token {nameof(LoggerBase)}…");
+            using (LoggerBase log = new TokenLogger("")) // Let the logger decide on the file name.
+            {
+                log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
+                for (int i = 1; i < maxCount + 1; i++) // test concurrency
+                {
+                    log.Write($"Index #{i}");
+                }
+                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
+                Console.WriteLine($"{log.LogFilePath}");
+            }
         }
         #endregion
 
         #region [WaitHandleLogger]
-        // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        Console.WriteLine($"{Environment.NewLine}• Testing WaitHandle {nameof(LoggerBase)}…");
-        using (LoggerBase log = new HandleLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerHandle.txt")))
+        using (StopClock sc = new StopClock(color: ConsoleColor.Green))
         {
-            log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
-
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
-
-            for (int i = 1; i < 21; i++)
+            Console.WriteLine($"{Environment.NewLine}• Testing WaitHandle {nameof(LoggerBase)}…");
+            using (LoggerBase log = new HandleLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerHandle.txt")))
             {
-                log.Write($"Index #{i}");
+                log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
+                for (int i = 1; i < maxCount + 1; i++) // test concurrency
+                {
+                    log.Write($"Index #{i}");
+                }
+                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
+                Console.WriteLine($"{log.LogFilePath}");
             }
-
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
-
-            Console.WriteLine($"{log.LogFilePath}");
         }
         #endregion
 
         #region [DeferredLogger]
-        Console.WriteLine($"{Environment.NewLine}• Testing Deferred {nameof(LoggerBase)}…");
-        using (LoggerBase log = new DeferredLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerDeferred.txt")))
+        using (StopClock sc = new StopClock(color: ConsoleColor.Red))
         {
-            log.TimeFormat = "yyyy-MM-dd hh:mm:ss.fff tt";
-            log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+            Console.WriteLine($"{Environment.NewLine}• Testing Deferred {nameof(LoggerBase)}…");
+            using (LoggerBase log = new DeferredLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerDeferred.txt")))
+            {
+                log.TimeFormat = "yyyy-MM-dd hh:mm:ss.fff tt";
+                log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
+                for (int i = 1; i < maxCount + 1; i++) // test concurrency
+                {
+                    Thread.Sleep(1);
+                    log.Write($"Index #{i}");
+                }
 
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
-            for (int i = 1; i < 6; i++) 
-            { 
-                Thread.Sleep(10); 
-                log.Write($"Index #{i}"); 
+                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
+                Thread.Sleep(10);
+                Console.WriteLine($"{log.LogFilePath}");
             }
-
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
-
-            Console.WriteLine($"{log.LogFilePath}");
         }
         #endregion
 
         #region [HashSetLogger]
-        Console.WriteLine($"{Environment.NewLine}• Testing HashSet {nameof(LoggerBase)}…");
-        using (LoggerBase log = new HashSetLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerHashSet.txt")))
+        using (StopClock sc = new StopClock(color: ConsoleColor.DarkCyan))
         {
-            ((HashSetLogger)log).DaysUntilWipe = 0.5; // Example of changing the flush trigger.
-            log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
-            Task.Run(() =>
+            Console.WriteLine($"{Environment.NewLine}• Testing HashSet {nameof(LoggerBase)}…");
+            using (LoggerBase log = new HashSetLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerHashSet.txt")))
             {
-                for (int i = 1; i < 101; i++)
+                ((HashSetLogger)log).DaysUntilWipe = 0.5; // Example of changing the flush trigger.
+                log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+                Task.Run(() =>
+                {
+                    for (int i = 1; i < maxCount + 1; i++)
+                    {
+                        log.Write($"This should only appear once in the log file.");
+                    }
+                });
+                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
+                for (int i = 1; i < maxCount + 1; i++)
                 {
                     log.Write($"This should only appear once in the log file.");
                 }
-            });
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
-            for (int i = 1; i < 101; i++)
-            {
-                log.Write($"This should only appear once in the log file.");
+                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
+                Console.WriteLine($"{log.LogFilePath}");
             }
-            log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
-            Console.WriteLine($"{log.LogFilePath}");
         }
         #endregion
 
         #region [IntervalLogger]
-        // This test is different since we want to keep the object around for some time to test interval writing.
-        Console.WriteLine($"{Environment.NewLine}• Testing Interval {nameof(LoggerBase)}…");
-        LoggerBase iLog = new IntervalLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerInterval.txt"), TimeSpan.FromSeconds(10));
-        iLog.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
-        iLog.LogFileEncoding = Encoding.ASCII; // Example of changing file encoding after object creation.
-        ((IntervalLogger)iLog).WriteInterval = TimeSpan.FromSeconds(2); // Example of changing time interval after object creation.
-        iLog.Write($"{iLog.GetType()?.Name} of base type {iLog.GetType()?.BaseType?.Name} - Test started.");
-        for (int i = 1; i < 6; i++)
+        using (StopClock sc = new StopClock(color: ConsoleColor.DarkYellow))
         {
-            Thread.Sleep(10);
-            // There is no need to call IsAllowed() from the user's point of view, for the test it serves as an awaiter.
-            while (!((IntervalLogger)iLog).IsAllowed())
+            // This test is different since we want to keep the object around for some time to test interval writing.
+            Console.WriteLine($"{Environment.NewLine}• Testing Interval {nameof(LoggerBase)}…");
+            LoggerBase iLog = new IntervalLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerInterval.txt"), TimeSpan.FromSeconds(10));
+            iLog.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+            iLog.LogFileEncoding = Encoding.ASCII; // Example of changing file encoding after object creation.
+            ((IntervalLogger)iLog).WriteInterval = TimeSpan.FromSeconds(2); // Example of changing time interval after object creation.
+            iLog.Write($"{iLog.GetType()?.Name} of base type {iLog.GetType()?.BaseType?.Name} - Test started.");
+            for (int i = 1; i < (maxCount / 2) + 1; i++)
             {
-                Console.Write($"•");
-                Thread.Sleep(333);
+                Thread.Sleep(10);
+                // There is no need to call IsAllowed() from the user's point of view, for the test it serves as an awaiter.
+                while (!((IntervalLogger)iLog).IsAllowed())
+                {
+                    Console.Write($"•");
+                    Thread.Sleep(333);
+                }
+                iLog.Write($"Index #{i}");
             }
-            iLog.Write($"Index #{i}");
+            Console.WriteLine();
+            iLog.Write($"{iLog.GetType()?.Name} of base type {iLog.GetType()?.BaseType?.Name} - Test finished.");
+            Console.WriteLine($"{iLog.LogFilePath}");
+            iLog.Dispose();
         }
-        Console.WriteLine();
-        iLog.Write($"{iLog.GetType()?.Name} of base type {iLog.GetType()?.BaseType?.Name} - Test finished.");
-        Console.WriteLine($"{iLog.LogFilePath}");
-        iLog.Dispose();
         #endregion
+
+        TestJobQueue.Run();
+    }
+}
+
+/// <summary>
+/// A practical example for the <see cref="JobQueue{T}"/>.
+/// </summary>
+public static class TestJobQueue
+{
+    public static void Run()
+    {
+        Func<string, Task> logMethod = message =>
+        {
+            try
+            {
+                using (StreamWriter writer = new StreamWriter(Path.Combine(Directory.GetCurrentDirectory(), "JobQueue.log"), append: true, Encoding.UTF8))
+                {
+                    return writer.WriteLineAsync($"{message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                return Task.FromException(ex);
+            }
+        };
+
+        Task.Run(async () =>
+        {
+            Console.WriteLine($"{Environment.NewLine}• Testing {nameof(JobQueue<string>)}…");
+            using (StopClock sc = new StopClock(color: ConsoleColor.Cyan))
+            {
+                IJobQueue<string> jobQueue = new JobQueue<string>(2, logMethod);
+                //jobQueue.Depleted += (dt) => { Console.WriteLine($"• JobQueue empty at {dt.ToString("hh:mm:ss.fff tt")}"); };
+                jobQueue.UnhandledException += (ex) => { Console.WriteLine($"• JobQueue exception: {ex.Message}"); };
+
+                Task[] tasks = new Task[100];
+                for (int i = 0; i < tasks.Length; i++)
+                {
+                    int num = i+1;
+                    tasks[i] = jobQueue.Enqueue($"{DateTime.Now.ToString("hh:mm:ss.fff tt")} log line {num}");
+                    //tasks[i] = jobQueue.EnqueueIgnoreExceptions($"{DateTime.Now.ToString("hh:mm:ss.fff tt")} log line {num}");
+                }
+                // Wait for all logging tasks to finish.
+                await Task.WhenAll(tasks);
+            }
+        }).ContinueWith(t =>
+        {
+            Console.WriteLine($"• JobQueue TaskStatus: {t.Status}");
+        });
+
+        Thread.Sleep(1000);
     }
 }
 #endregion
