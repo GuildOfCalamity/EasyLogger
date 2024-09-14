@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -119,6 +120,7 @@ namespace Logger
                 catch (ObjectDisposedException)
                 {
                     // We don't mind if the semaphore has been disposed at this moment.
+                    Debug.WriteLine("[WARNING] Semaphore is already disposed.");
                 }
             }
             catch (Exception ex)
@@ -138,7 +140,8 @@ namespace Logger
         public void Dispose()
         {
             _isDisposed = true;
-            _semaphore.Dispose();
+            try { _semaphore.Dispose(); }
+            catch (Exception) { }
         }
 
     }

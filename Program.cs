@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using EasyLogger;
 using Logger;
 
 namespace EasyLogger;
@@ -237,7 +238,7 @@ public static class TestLoggers
         }
         #endregion
 
-        TestJobQueue.Run();
+        //TestJobQueue.Run();
     }
 }
 
@@ -246,15 +247,25 @@ public static class TestLoggers
 /// </summary>
 public static class TestJobQueue
 {
-    public static void Run()
+    static Random rnd = new Random();
+
+    public static void Run(int max = 100)
     {
-        Func<string, Task> logMethod = message =>
+        int exCount = 0;
+
+        if (max <= 0)
+            max = 10;
+
+        Func<JobTestObject, Task> logMethod = message =>
         {
             try
             {
+                if (message.Index == max/2)
+                    throw new Exception($"Fake error for message #{message.Index}.");
+
                 using (StreamWriter writer = new StreamWriter(Path.Combine(Directory.GetCurrentDirectory(), "JobQueue.log"), append: true, Encoding.UTF8))
                 {
-                    return writer.WriteLineAsync($"{message}");
+                    return writer.WriteLineAsync($"{message.Value}");
                 }
             }
             catch (Exception ex)
@@ -265,29 +276,42 @@ public static class TestJobQueue
 
         Task.Run(async () =>
         {
-            Console.WriteLine($"{Environment.NewLine}• Testing {nameof(JobQueue<string>)}…");
+            Console.WriteLine($"{Environment.NewLine}• Testing {nameof(JobQueue<JobTestObject>)}…");
             using (StopClock sc = new StopClock(color: ConsoleColor.Cyan))
             {
-                IJobQueue<string> jobQueue = new JobQueue<string>(2, logMethod);
-                //jobQueue.Depleted += (dt) => { Console.WriteLine($"• JobQueue empty at {dt.ToString("hh:mm:ss.fff tt")}"); };
-                jobQueue.UnhandledException += (ex) => { Console.WriteLine($"• JobQueue exception: {ex.Message}"); };
-
-                Task[] tasks = new Task[100];
-                for (int i = 0; i < tasks.Length; i++)
+                IJobQueue<JobTestObject> jobQueue = new JobQueue<JobTestObject>(10, logMethod);
+                jobQueue.UnhandledException += (ex) => { Console.WriteLine($"• JobQueue exception event: {ex.Message}"); };
+                Task[] tasks = new Task[max];
+                try
                 {
-                    int num = i+1;
-                    tasks[i] = jobQueue.Enqueue($"{DateTime.Now.ToString("hh:mm:ss.fff tt")} log line {num}");
-                    //tasks[i] = jobQueue.EnqueueIgnoreExceptions($"{DateTime.Now.ToString("hh:mm:ss.fff tt")} log line {num}");
+                    for (int i = 0; i < tasks.Length; i++)
+                    {
+                        int num = i+1;
+
+                        tasks[i] = jobQueue.Enqueue(new JobTestObject { Index = num, Value = $"{DateTime.Now.ToString("hh:mm:ss.fff tt")} ⇒ log line {num}" });
+                        
+                        // If you choose to use EnqueueIgnoreExceptions, then any thrown exceptions will not be propagated.
+                        //tasks[i] = jobQueue.EnqueueIgnoreExceptions(new TestObject { Index = num, Value = $"{DateTime.Now.ToString("hh:mm:ss.fff tt")} log line {num}" });
+                    }
+                    await Task.WhenAll(tasks);
                 }
-                // Wait for all logging tasks to finish.
-                await Task.WhenAll(tasks);
+                catch (Exception ex)
+                {
+                    exCount++;
+                    Console.WriteLine($"• Caught task error from Func<T,Task> method: {ex.Message}");
+                }
             }
         }).ContinueWith(t =>
         {
             Console.WriteLine($"• JobQueue TaskStatus: {t.Status}");
+            Console.WriteLine($"• JobQueue Exceptions: {exCount}");
         });
-
         Thread.Sleep(1000);
     }
+}
+public class JobTestObject
+{
+    public int Index { get; set; } = 0;
+    public string Value { get; set; } = "";
 }
 #endregion

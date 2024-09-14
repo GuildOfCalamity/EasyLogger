@@ -48,6 +48,12 @@ public abstract class LoggerBase : IDisposable
     protected string _timeFormat = "yyyy-MM-dd hh:mm:ss.fff tt"; // 2024-08-24 11:30:00.000 AM
 
     /// <summary>
+    /// Assembles the logging path structure for the file.
+    /// </summary>
+    public virtual string GetLogPath() => Path.Combine(System.AppContext.BaseDirectory, $@"Logs\{DateTime.Today.Year}\{DateTime.Today.Month.ToString("00")}-{DateTime.Today.ToString("MMMM")}");
+    public virtual string GetLogName() => Path.Combine(GetLogPath(), $@"{Path.GetFileNameWithoutExtension(Assembly.GetEntryAssembly()?.Location)}_{DateTime.Now.ToString("dd")}.log");
+
+    /// <summary>
     /// Base constructor
     /// </summary>
     /// <param name="logFilePath">full path to log file</param>
@@ -57,9 +63,26 @@ public abstract class LoggerBase : IDisposable
             _logFilePath = logFilePath;
         else
         {
-            // If null, we'll attempt to determine the caller and use that as the log file's name.
-            try { _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetEntryAssembly()?.Location)}.log"); }
-            catch (Exception) { _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetExecutingAssembly().Location)}.log"); }
+            // If null, then assemble the pathing for the user.
+            try 
+            {
+                if (!Directory.Exists(GetLogPath()))
+                    Directory.CreateDirectory(GetLogPath());
+
+                _logFilePath = GetLogName();
+            }
+            catch (Exception) 
+            {
+                // On error, we'll attempt to determine the caller and use that as the log file's name.
+                try
+                {
+                    _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetEntryAssembly()?.Location)}.log"); 
+                }
+                catch (Exception)
+                {
+                    _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetExecutingAssembly().Location)}.log");
+                }
+            }
         }
     }
 
