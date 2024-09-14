@@ -1,10 +1,8 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.IO;
 using System.Reflection;
 using System.Text;
-using EasyLogger;
+
 using Logger;
 
 namespace EasyLogger;
@@ -289,8 +287,7 @@ public static class TestJobQueue
                         int num = i+1;
 
                         tasks[i] = jobQueue.Enqueue(new JobTestObject { Index = num, Value = $"{DateTime.Now.ToString("hh:mm:ss.fff tt")} ⇒ log line {num}" });
-                        
-                        // If you choose to use EnqueueIgnoreExceptions, then any thrown exceptions will not be propagated.
+                        // NOTE: If you choose to use EnqueueIgnoreExceptions, then any thrown exceptions will not be propagated.
                         //tasks[i] = jobQueue.EnqueueIgnoreExceptions(new TestObject { Index = num, Value = $"{DateTime.Now.ToString("hh:mm:ss.fff tt")} log line {num}" });
                     }
                     await Task.WhenAll(tasks);
@@ -304,7 +301,7 @@ public static class TestJobQueue
         }).ContinueWith(t =>
         {
             Console.WriteLine($"• JobQueue TaskStatus: {t.Status}");
-            Console.WriteLine($"• JobQueue Exceptions: {exCount}");
+            Console.WriteLine($"• JobQueue Exceptions: {(exCount > 0 ? $"{exCount}" : "None")}");
         });
         Thread.Sleep(1000);
     }

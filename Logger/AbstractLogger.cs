@@ -43,9 +43,11 @@ public abstract class LoggerBase : IDisposable
     public event Action<Exception>? OnException;
     protected Encoding _logFileEncoding = Encoding.UTF8;
     protected readonly int _minWait = 5; // milliseconds
-    protected string _logFilePath;
+    protected string? _logFilePath;
     protected string _delimiter ="\t";
-    protected string _timeFormat = "yyyy-MM-dd hh:mm:ss.fff tt"; // 2024-08-24 11:30:00.000 AM
+    protected string _timeFormat = "yyyy-MM-dd hh:mm:ss.fff tt";
+    protected bool _usingStartDate = false;
+    protected DateTime _startDate;
 
     /// <summary>
     /// Assembles the logging path structure for the file.
@@ -60,29 +62,16 @@ public abstract class LoggerBase : IDisposable
     protected LoggerBase(string logFilePath)
     {
         if (!string.IsNullOrEmpty(logFilePath))
+        {
+            _timeFormat = "yyyy-MM-dd hh:mm:ss.fff tt";
             _logFilePath = logFilePath;
+        }
         else
         {
-            // If null, then assemble the pathing for the user.
-            try 
-            {
-                if (!Directory.Exists(GetLogPath()))
-                    Directory.CreateDirectory(GetLogPath());
-
-                _logFilePath = GetLogName();
-            }
-            catch (Exception) 
-            {
-                // On error, we'll attempt to determine the caller and use that as the log file's name.
-                try
-                {
-                    _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetEntryAssembly()?.Location)}.log"); 
-                }
-                catch (Exception)
-                {
-                    _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetExecutingAssembly().Location)}.log");
-                }
-            }
+            _timeFormat = "hh:mm:ss.fff tt"; // files will have the date in the name
+            _usingStartDate = true;
+            _startDate = DateTime.Now.Date;
+            GenerateLogName();
         }
     }
 
@@ -138,6 +127,45 @@ public abstract class LoggerBase : IDisposable
     public virtual void Dispose()
     {
         Console.WriteLine($"[INFO] {this.GetType()?.Name} of base type {this.GetType()?.BaseType?.Name} is disposing.");
+    }
+
+    /// <summary>
+    /// When allowing the <see cref="LoggerBase"/> to decide the log file 
+    /// name for you, this determines if a name change is warranted.
+    /// </summary>
+    public virtual void CheckFileRotation()
+    {
+        if (_usingStartDate && DateTime.Now.Date != _startDate)
+        {
+            _startDate = DateTime.Now.Date;
+            GenerateLogName();
+        }
+    }
+
+    /// <summary>
+    /// Decides the log file name for the user.
+    /// </summary>
+    void GenerateLogName()
+    {
+        try
+        {
+            if (!Directory.Exists(GetLogPath()))
+                Directory.CreateDirectory(GetLogPath());
+
+            _logFilePath = GetLogName();
+        }
+        catch (Exception)
+        {
+            // On error, we'll attempt to determine the caller and use that as the log file's name.
+            try
+            {
+                _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetEntryAssembly()?.Location)}.log");
+            }
+            catch (Exception)
+            {
+                _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetExecutingAssembly().Location)}.log");
+            }
+        }
     }
 
     /// <summary>
@@ -220,6 +248,7 @@ public class BufferedLogger : LoggerBase
         }
         else
         {
+            CheckFileRotation();
             try
             {
                 _logQueue.Enqueue((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
@@ -367,6 +396,7 @@ public class QueuedLogger : LoggerBase
         }
         else
         {
+            CheckFileRotation();
             try
             {
                 if (!_collection.TryAdd(new Message(value, level, time)))
@@ -467,6 +497,7 @@ public class TokenLogger :  LoggerBase
             Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
         else
         {
+            CheckFileRotation();
             try
             {
                 _logQueue?.TryAdd((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
@@ -593,7 +624,13 @@ public class DeferredLogger : LoggerBase
         if (level == LogLevel.OFF)
             Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
         else
-            Task.Run(async () => await WriteToLogFileAsync((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}"));
+        {
+            Task.Run(async () => 
+            {
+                CheckFileRotation();
+                await WriteToLogFileAsync((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}"); 
+            });
+        }
     }
 
     async Task WriteToLogFileAsync(string message)
@@ -712,6 +749,7 @@ public class HandleLogger : LoggerBase
             Console.WriteLine((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
         else
         {
+            CheckFileRotation();
             lock (logQueue)
             {
                 logQueue.Enqueue((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
@@ -865,6 +903,7 @@ public class IntervalLogger : LoggerBase
         }
         else
         {
+            CheckFileRotation();
             try
             {
                 if (!_collection.TryAdd(new Message(value, level, time)))
@@ -1022,6 +1061,7 @@ public class HashSetLogger : LoggerBase
         }
         else
         {
+            CheckFileRotation();
             try
             {
                 _working = true;

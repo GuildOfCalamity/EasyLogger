@@ -105,7 +105,7 @@ namespace Logger
         /// <summary>
         /// Awaits an available slot and starts the async operation.
         /// </summary>
-        private async Task Run(T item, bool throwExceptions)
+        async Task Run(T item, bool throwExceptions)
         {
             Interlocked.Increment(ref _queuedCount);
             try
@@ -213,9 +213,9 @@ namespace Logger
         {
             var retTask = await Task.WhenAny(task, Task.Delay(timeoutInMilliseconds)).ConfigureAwait(false);
 
-#pragma warning disable CS8603 // Possible null reference return.
+            #pragma warning disable CS8603 // Possible null reference return.
             return retTask is Task<T> ? task.Result : default;
-#pragma warning restore CS8603 // Possible null reference return.
+            #pragma warning restore CS8603 // Possible null reference return.
         }
 
         /// <summary>
@@ -274,6 +274,12 @@ namespace Logger
             return tcs.Task;
         }
 
+        /// <summary>
+        /// Bandwidth helper for <see cref="IEnumerable{Func{TResult}}"/>
+        /// </summary>
+        /// <param name="toRun"></param>
+        /// <param name="throttleTo"></param>
+        /// <returns><see cref="Task"/></returns>
         internal static async Task Throttle(this IEnumerable<Func<Task>> toRun, int throttleTo)
         {
             var running = new List<Task>(throttleTo);
@@ -288,7 +294,14 @@ namespace Logger
             }
         }
 
-        internal static async Task<IEnumerable<T>> Throttle<T>(IEnumerable<Func<Task<T>>> toRun, int throttleTo)
+        /// <summary>
+        /// Bandwidth  helper for <see cref="IEnumerable{Func{Task{T}}}"/>
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="toRun"></param>
+        /// <param name="throttleTo"></param>
+        /// <returns><see cref="Task{IEnumerable{T}}"/></returns>
+        internal static async Task<IEnumerable<T>> Throttle<T>(this IEnumerable<Func<Task<T>>> toRun, int throttleTo)
         {
             var running = new List<Task<T>>(throttleTo);
             var completed = new List<Task<T>>(toRun.Count());
@@ -303,6 +316,89 @@ namespace Logger
                 }
             }
             return completed.Select(t => t.Result);
+        }
+
+        /// <summary>
+        /// LINQ extension to be able to fluently wait for all of <see cref="IEnumerable{T}" /> of <see cref="Task" /> 
+        /// just like <see cref="Task.WhenAll(System.Threading.Tasks.Task[])" />.
+        /// </summary>
+        /// <param name="tasks">The tasks.</param>
+        /// <returns>An awaitable task</returns>
+        /// <example><code>
+        /// var something = await foos.Select(foo => BarAsync(foo)).WhenAll();
+        /// </code></example>
+        /// <exception cref="System.ArgumentNullException"></exception>
+        /// <exception cref="System.ArgumentException"></exception>
+        internal static Task WhenAll(this IEnumerable<Task> tasks)
+        {
+            var enumeratedTasks = tasks as Task[] ?? tasks?.ToArray();
+
+            return Task.WhenAll(enumeratedTasks);
+        }
+
+        /// <summary>
+        /// LINQ extension to be able to fluently wait for any of <see cref="IEnumerable{T}" /> of <see cref="Task" /> 
+        /// just like <see cref="Task.WhenAll(System.Threading.Tasks.Task[])" />.
+        /// </summary>
+        /// <param name="tasks">The tasks.</param>
+        /// <returns>An awaitable task</returns>
+        /// <example><code>
+        /// var something = await foos.Select(foo => BarAsync(foo)).WhenAll();
+        /// </code></example>
+        /// <exception cref="System.ArgumentNullException"></exception>
+        /// <exception cref="System.ArgumentException"></exception>
+        internal static Task WhenAny(this IEnumerable<Task> tasks)
+        {
+            var enumeratedTasks = tasks as Task[] ?? tasks.ToArray();
+
+            return Task.WhenAny(enumeratedTasks);
+        }
+
+        /// <summary>
+        /// LINQ extension to be able to fluently wait for all of <see cref="IEnumerable{T}" /> of <see cref="Task" /> 
+        /// just like <see cref="Task.WhenAll(System.Threading.Tasks.Task{TResult}[])" />.
+        /// </summary>
+        /// <param name="tasks">The tasks.</param>
+        /// <returns>An awaitable task</returns>
+        /// <example><code>
+        /// var bars = await foos.Select(foo => BarAsync(foo)).WhenAll();
+        /// </code></example>
+        /// <exception cref="System.ArgumentNullException"></exception>
+        /// <exception cref="System.ArgumentException"></exception>
+        internal static async Task<IEnumerable<TResult>> WhenAll<TResult>(this IEnumerable<Task<TResult>> tasks)
+        {
+            var enumeratedTasks = tasks as Task<TResult>[] ?? tasks.ToArray();
+            var result = await Task.WhenAll(enumeratedTasks);
+            return result;
+        }
+
+        /// <summary>
+        /// LINQ extension to be able to fluently wait for all of <see cref="IEnumerable{T}" /> of <see cref="Task" /> just
+        /// like <see cref="Task.WhenAny(System.Threading.Tasks.Task{TResult}[])" />.
+        /// </summary>
+        /// <param name="tasks">The tasks.</param>
+        /// <returns>An awaitable task</returns>
+        /// <example><code>
+        /// var bar = await foos.Select(foo => BarAsync(foo)).WhenAll();
+        /// </code></example>
+        /// <exception cref="System.ArgumentNullException"></exception>
+        /// <exception cref="System.ArgumentException"></exception>
+        internal static async Task<TResult> WhenAny<TResult>(this IEnumerable<Task<TResult>> tasks)
+        {
+            var enumeratedTasks = tasks as Task<TResult>[] ?? tasks.ToArray();
+            var result = await await Task.WhenAny(enumeratedTasks);
+            return result;
+        }
+
+        /// <summary>
+        /// <see cref="SemaphoreSlim"/> helper.
+        /// </summary>
+        /// <param name="ss"></param>
+        /// <returns><see cref="Task{TResult}"/></returns>
+        internal static async Task<int> EnterAsync(this SemaphoreSlim ss)
+        {
+            await ss.WaitAsync().ConfigureAwait(false);
+            return ss.Release();
         }
     }
 }
