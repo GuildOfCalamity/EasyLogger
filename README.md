@@ -1,4 +1,7 @@
+![Icon](AppIcon.png) 
 # EasyLogger
+
+
 
 ## v1.0.0.0 - August 2024
 **Dependencies**
@@ -30,8 +33,8 @@
 - I've added a custom [SemaphoreSlim](https://learn.microsoft.com/en-us/dotnet/api/system.threading.semaphoreslim?view=netframework-4.8.1) for determining when it has been disposed. Ironically the BCL **SemaphoreSlim** does contain a **CheckDisposed()** method, but it's private.
 	- From the [Dispose](https://learn.microsoft.com/en-us/dotnet/api/system.threading.semaphoreslim.dispose?view=netframework-4.8.1) notes: "*Always call Dispose before you release your last reference to the SemaphoreSlim. Otherwise, the resources it is using will not be freed until the garbage collector calls the SemaphoreSlim object's Finalize method.*"
 
-![Screenshot](./Screenshot.png)
+![Screenshot](Screenshot.png)
 
 - Selecting your preferred version in the IDE: 
 
-![Framework](./FrameworkSelection.png)
+![Framework](FrameworkSelection.png)

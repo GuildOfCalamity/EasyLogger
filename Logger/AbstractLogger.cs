@@ -71,7 +71,7 @@ public abstract class LoggerBase : IDisposable
             _timeFormat = "hh:mm:ss.fff tt"; // files will have the date in the name
             _usingStartDate = true;
             _startDate = DateTime.Now.Date;
-            GenerateLogName();
+            _logFilePath = GenerateLogName();
         }
     }
 
@@ -138,34 +138,36 @@ public abstract class LoggerBase : IDisposable
         if (_usingStartDate && DateTime.Now.Date != _startDate)
         {
             _startDate = DateTime.Now.Date;
-            GenerateLogName();
+            _logFilePath = GenerateLogName();
         }
     }
 
     /// <summary>
     /// Decides the log file name for the user.
     /// </summary>
-    void GenerateLogName()
+    string GenerateLogName()
     {
+        string result = "Application.log";
         try
         {
             if (!Directory.Exists(GetLogPath()))
                 Directory.CreateDirectory(GetLogPath());
 
-            _logFilePath = GetLogName();
+            result = GetLogName();
         }
         catch (Exception)
         {
             // On error, we'll attempt to determine the caller and use that as the log file's name.
             try
             {
-                _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetEntryAssembly()?.Location)}.log");
+                result = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetEntryAssembly()?.Location)}.log");
             }
             catch (Exception)
             {
-                _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetExecutingAssembly().Location)}.log");
+                result = Path.Combine(Directory.GetCurrentDirectory(), $"{Path.GetFileNameWithoutExtension(Assembly.GetExecutingAssembly().Location)}.log");
             }
         }
+        return result;
     }
 
     /// <summary>
