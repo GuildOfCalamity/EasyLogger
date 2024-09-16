@@ -604,12 +604,13 @@ public class TokenLogger :  LoggerBase
 /// Simple deferred-style logger for non-blocked calls with file I/O.
 /// </summary>
 /// <remarks>
-/// Concurrency is not guaranteed in the <see cref="DeferredLogger"/>, 
-/// since each write will have it's own thread assigned. 
-/// The <see cref="SemaphoreSlimEx"/> should help with the issue.
+/// Concurrency is not guaranteed in the <see cref="DeferredLogger"/>, since each write will have it's own thread assigned. 
+/// The <see cref="SemaphoreSlimEx"/> will help with the issue.
+/// I've modified this to use a <see cref="Mutex"/> for better race prevention.
 /// </remarks>
 public class DeferredLogger : LoggerBase
 {
+    readonly Mutex _mtx;
     readonly SemaphoreSlimEx _semaphore;
 
     /// <summary>
@@ -618,6 +619,7 @@ public class DeferredLogger : LoggerBase
     /// <param name="logFilePath">full path to log file</param>
     public DeferredLogger(string logFilePath) : base(logFilePath)
     {
+        _mtx = new Mutex(false, @"Global\DeferredLogger");
         _semaphore = new SemaphoreSlimEx(1, 10);
     }
 
@@ -630,12 +632,45 @@ public class DeferredLogger : LoggerBase
             Task.Run(async () => 
             {
                 CheckFileRotation();
-                await WriteToLogFileAsync((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}"); 
+                //await WriteToLogFileSemaphore((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
+                await WriteToLogFileMutex((time ? $"{DateTime.Now.ToString(_timeFormat)}{_delimiter}{level}{_delimiter}" : $"{level}{_delimiter}") + $"{message}");
             });
         }
     }
 
-    async Task WriteToLogFileAsync(string message)
+    async Task WriteToLogFileMutex(string message)
+    {
+        _mtx.WaitOne(10);
+        try
+        {
+            using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
+            {
+                await writer.WriteLineAsync($"{message}");
+            }
+        }
+        catch (Exception) /* typically permission or file-lock issue */
+        {
+            try
+            {
+                await Task.Delay(_minWait);
+                // Try one more time before raising an exception event.
+                using (StreamWriter writer = new StreamWriter(_logFilePath, append: true, _logFileEncoding))
+                {
+                    await writer.WriteLineAsync($"{message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                RaiseException(ex);
+            }
+        }
+        finally
+        {
+            _mtx.ReleaseMutex();
+        }
+    }
+
+    async Task WriteToLogFileSemaphore(string message)
     {
         int maxTries = _minWait;
 
@@ -687,6 +722,8 @@ public class DeferredLogger : LoggerBase
     {
         if (!_semaphore.IsDisposed)
             _semaphore?.Dispose();
+
+        _mtx?.Dispose();
 
         base.Dispose();
     }

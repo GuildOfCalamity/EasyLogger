@@ -72,19 +72,41 @@ public class Program
 #region [Testing]
 /// <summary>
 /// Basic test class for
-/// <see cref="BufferedLogger"/>
-/// <see cref="QueuedLogger"/>
-/// <see cref="TokenLogger"/>
-/// <see cref="HandleLogger"/>
-/// <see cref="DeferredLogger"/>
-/// <see cref="HashSetLogger"/>
-/// <see cref="IntervalLogger"/>
+/// <see cref="DeferredLogger"/>,
+/// <see cref="BufferedLogger"/>,
+/// <see cref="QueuedLogger"/>,
+/// <see cref="TokenLogger"/>,
+/// <see cref="HandleLogger"/>,
+/// <see cref="HashSetLogger"/> and
+/// <see cref="IntervalLogger"/>.
 /// </summary>
 public static class TestLoggers
 {
     public static void Run()
     {
         int maxCount = 10;
+
+        #region [DeferredLogger]
+        using (StopClock sc = new StopClock(color: ConsoleColor.Red))
+        {
+            Console.WriteLine($"{Environment.NewLine}• Testing Deferred {nameof(LoggerBase)}…");
+            using (LoggerBase log = new DeferredLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerDeferred.txt")))
+            {
+                log.TimeFormat = "yyyy-MM-dd hh:mm:ss.fff tt";
+                log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
+                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
+                for (int i = 1; i < maxCount + 1; i++) // test concurrency
+                {
+                    Thread.Sleep(1);
+                    log.Write($"Index #{i}");
+                }
+
+                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
+                Thread.Sleep(10);
+                Console.WriteLine($"{log.LogFilePath}");
+            }
+        }
+        #endregion
 
         #region [BufferedLogger]
         using (StopClock sc = new StopClock(color: ConsoleColor.Yellow))
@@ -155,28 +177,6 @@ public static class TestLoggers
                     log.Write($"Index #{i}");
                 }
                 log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
-                Console.WriteLine($"{log.LogFilePath}");
-            }
-        }
-        #endregion
-
-        #region [DeferredLogger]
-        using (StopClock sc = new StopClock(color: ConsoleColor.Red))
-        {
-            Console.WriteLine($"{Environment.NewLine}• Testing Deferred {nameof(LoggerBase)}…");
-            using (LoggerBase log = new DeferredLogger(Path.Combine(Directory.GetCurrentDirectory(), $"LoggerDeferred.txt")))
-            {
-                log.TimeFormat = "yyyy-MM-dd hh:mm:ss.fff tt";
-                log.OnException += (ex) => { Debug.WriteLine($"[WARNING] {ex.Message}"); };
-                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test started.");
-                for (int i = 1; i < maxCount + 1; i++) // test concurrency
-                {
-                    Thread.Sleep(1);
-                    log.Write($"Index #{i}");
-                }
-
-                log.Write($"{log.GetType()?.Name} of base type {log.GetType()?.BaseType?.Name} - Test finished.");
-                Thread.Sleep(10);
                 Console.WriteLine($"{log.LogFilePath}");
             }
         }
